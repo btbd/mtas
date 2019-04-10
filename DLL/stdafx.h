@@ -303,6 +303,8 @@ static wchar_t *KEYS[] = {
 	L"", // fe
 };
 
+#define DELAY (0.02f)
+
 struct FRAME {
 	struct {
 		float change, delta; // negative delta if MouseY

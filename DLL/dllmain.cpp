@@ -2,7 +2,7 @@
 
 bool disable_rendering = false;
 DWORD control = 0, processed_frames = 0;
-double delay = 0.02f;
+double delay = DELAY;
 
 struct {
 	wchar_t command[0xFF] = { 0 };
@@ -48,7 +48,7 @@ void UpdateEngineHook() {
 
 	++processed_frames;
 
-	*time.delta = 0.02f;
+	*time.delta = DELAY;
 	*time.last = *time.current = 0;
 
 	if (*demo.command && demo.jump) {
@@ -159,7 +159,7 @@ int __fastcall MouseHandlerHook(int this_, void *idle_, int a2, int a3, int id, 
 
 void __fastcall PlayerHandlerHook(void *this_, void *idle_, float a2, int a3) {
 	base.faith = (DWORD)this_;
-	PlayerHandlerOriginal(this_, 0.02f, a3);
+	PlayerHandlerOriginal(this_, DELAY, a3);
 }
 
 __declspec(naked) void CreateDeviceHook() {
@@ -268,7 +268,6 @@ BOOL WINAPI QueryPerformanceFrequencyHook(LARGE_INTEGER *f) {
 }
 
 BOOL WINAPI QueryPerformanceCounterHook(LARGE_INTEGER *f) {
-	if (disable_rendering) qpc.ticks += (ULONG64)1e3;
 	f->QuadPart = ++qpc.ticks;
 	return TRUE;
 }
@@ -565,11 +564,11 @@ EXPORT void GetDemoFrames(DWORD *out) {
 }
 
 EXPORT void SetTimescale(float scale) {
-	delay = 0.02f / scale;
+	delay = DELAY / scale;
 }
 
 EXPORT void GetTimescale(float *scale) {
-	if (scale) *scale = 0.02f / (float)delay;
+	if (scale) *scale = DELAY / (float)delay;
 }
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {

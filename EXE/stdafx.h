@@ -314,6 +314,9 @@ typedef struct {
 	} keys[100];
 } FRAME;
 
+#define FAITH_WIDTH (220)
+#define FAITH_HEIGHT (385)
+
 #define ALIGN_RIGHT (1 << 0)
 #define ALIGN_BOTTOM (1 << 1)
 #define SIZE_WIDTH (1 << 2)
@@ -336,5 +339,6 @@ void Call(DWORD addr, DWORD arg);
 DWORD CallRead(DWORD addr);
 void CopyFramesToClipboard(std::vector <FRAME> *frames);
 void AddFrame(FRAME *frame);
+LRESULT CALLBACK FaithProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK FrameDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);

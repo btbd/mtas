@@ -1,7 +1,9 @@
 ﻿#include "stdafx.h"
 
+// #define DEBUG
+
 HANDLE process = 0;
-DWORD focus_frame = 0;
+DWORD focus_frame = 0, faith_base = 0;
 HWND window = 0, frames_list = 0, command_input = 0;
 WNDPROC edit_proc = 0, drop_proc = 0;
 char current_demo[0xFF] = { 0 };
@@ -14,10 +16,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	InitCommonControls();
 
+#ifdef DEBUG
 	AllocConsole();
 	freopen("CONIN$", "r", stdin);
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
+#endif
 
 	if (!LoadLibraryA("DLL.dll")) {
 		MessageBoxA(0, "Failed to load DLL.dll", "Error", 0);
@@ -28,17 +32,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	wcex.cbSize = sizeof(WNDCLASSEX);
 	wcex.style = CS_HREDRAW | CS_VREDRAW;
 	wcex.lpfnWndProc = DefWindowProc;
-	wcex.cbClsExtra = 0;
-	wcex.cbWndExtra = 0;
 	wcex.hInstance = GetModuleHandle(0);
-	wcex.hIcon = 0;
 	wcex.hCursor = LoadCursor(0, IDC_ARROW);
-	wcex.hbrBackground = 0;
-	wcex.lpszMenuName = 0;
-	wcex.lpszClassName = L"win32app";
+	wcex.lpszClassName = L"mtas";
+	RegisterClassExW(&wcex);
+	wcex.lpfnWndProc = FaithProc;
+	wcex.lpszClassName = L"mtas_faith";
 	RegisterClassExW(&wcex);
 
-	window = CreateDialog(GetModuleHandle(0), MAKEINTRESOURCE(IDD_WINDOW), CreateWindow(L"win32app", L"", 0, 0, 0, 0, 0, 0, 0, GetModuleHandle(0), 0), DlgProc);
+	window = CreateDialog(GetModuleHandle(0), MAKEINTRESOURCE(IDD_WINDOW), CreateWindow(L"mtas", L"", 0, 0, 0, 0, 0, 0, 0, wcex.hInstance, 0), DlgProc);
 	ShowWindow(window, SW_SHOW);
 
 	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Listener, 0, 0, 0);
@@ -126,6 +128,9 @@ void Listener() {
 				} else if (scale == 4) {
 					CheckTimescale(ID_TIMESCALE_4);
 				}
+
+				MODULEENTRY32 mod = GetModuleInfoByName(pid, L"mirrorsedge.exe");
+				faith_base = ReadInt(process, (void *)((DWORD)ProcessFindPattern(process, mod.modBaseAddr, mod.modBaseSize, "\x89\x0D\x00\x00\x00\x00\xB9\x00\x00\x00\x00\xFF", "xx????x????x") + 2));	
 			}
 		} else {
 			pid = 0;
@@ -272,6 +277,11 @@ DWORD CallRead(DWORD addr) {
 	return r;
 }
 
+float IntToDegrees(int i) {
+	float r = (float)fmod(((float)i / 0x10000) * 360.0, 360);
+	return r < 0 ? r + 360 : r;
+}
+
 void CopyFramesToClipboard(std::vector <FRAME> *frames) {
 	DWORD size = frames->size() * sizeof(FRAME);
 	HGLOBAL m = GlobalAlloc(GMEM_MOVEABLE, 4 + size);
@@ -330,11 +340,6 @@ LRESULT FramesListDraw(LPARAM lParam) {
 INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 	static std::vector<ELEMENT> elements;
 
-	if (message == WM_ERASEBKGND) {
-		EnableScrollBar(frames_list, SB_VERT, ESB_ENABLE_BOTH);
-		ShowScrollBar(frames_list, SB_BOTH, TRUE);
-	}
-	
 	switch (message) {
 		case WM_INITDIALOG: {
 			command_input = GetDlgItem(hDlg, IDC_COMMAND);
@@ -380,6 +385,10 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 
 			break;
 		}
+		case WM_ERASEBKGND:
+			EnableScrollBar(frames_list, SB_VERT, ESB_ENABLE_BOTH);
+			ShowScrollBar(frames_list, SB_BOTH, TRUE);
+			break;
 		case WM_SIZE: case WM_SIZING: {
 			RECT size = { 0 };
 			GetClientRect(hDlg, &size);
@@ -475,13 +484,12 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					SetWindowTextA(hDlg, title);
 					break;
 				}
-				case IDC_START: {
+				case IDC_START:
 					SetDlgItemText(hDlg, IDC_PAUSE, L"||");
 					UpdateCommand();
 					Call(dll.StartDemo, 0);
 					SetFocusFrame(0);
 					break;
-				}
 				case IDC_PAUSE: {
 					if (ReadShort(process, (LPVOID)CallRead(dll.GetDemoCommand))) {
 						HWND button = GetDlgItem(hDlg, IDC_PAUSE);
@@ -498,15 +506,13 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					}
 					break;
 				}
-				case IDC_ADVANCE: {
+				case IDC_ADVANCE:
 					SetDlgItemText(hDlg, IDC_PAUSE, L"▶");
 					Call(dll.AddControl, CONTROL_ADVANCE);
 					break;
-				}
-				case IDC_RECORD: {
+				case IDC_RECORD:
 					Call(IsDlgButtonChecked(hDlg, IDC_RECORD) ? dll.AddControl : dll.RemoveControl, CONTROL_RECORD);
 					break;
-				}
 				case IDC_PAUSE_CHANGE:
 					Call(IsDlgButtonChecked(hDlg, IDC_PAUSE_CHANGE) ? dll.AddControl : dll.RemoveControl, CONTROL_PAUSE_CHANGE);
 					break;
@@ -525,6 +531,18 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 				case IDC_STOP:
 					WriteShort(process, (LPVOID)CallRead(dll.GetDemoCommand), 0);
 					Call(dll.RemoveControl, UINT_MAX);
+					SetDlgItemText(hDlg, IDC_PAUSE, L"||");
+					break;
+				case ID_FAITH: {
+					HWND hWnd = CreateWindow(L"mtas_faith", L"Faith Actor", WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, FAITH_WIDTH, FAITH_HEIGHT, 0, 0, GetModuleHandle(0), 0);
+					ShowWindow(hWnd, SW_SHOW);
+					UpdateWindow(hWnd);
+					break;
+				}
+				case ID_FR:
+					SetForegroundWindow(FindWindowExA(0, 0, "LaunchUnrealUWindowsClient", 0));
+					Sleep(1000);
+					Call(dll.RemoveControl, CONTROL_PAUSE | CONTROL_ADVANCE);
 					SetDlgItemText(hDlg, IDC_PAUSE, L"||");
 					break;
 				case ID_TIMESCALE_10:
@@ -641,7 +659,73 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			exit(0);
 	}
 
-	return (INT_PTR)FALSE;
+	return FALSE;
+}
+
+LRESULT CALLBACK FaithProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+	switch (message) {
+		case WM_CREATE:
+			SetTimer(hWnd, 0, 20, 0);
+			break;
+		case WM_TIMER: {
+			HDC hdcOld = GetDC(hWnd);
+			HDC hdc = CreateCompatibleDC(hdcOld);
+			HBITMAP hbm = CreateCompatibleBitmap(hdcOld, FAITH_WIDTH, FAITH_HEIGHT);
+			HGDIOBJ hbmOld = SelectObject(hdc, hbm);
+			HFONT font = CreateFontA(22, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "Segoe UI");
+			HGDIOBJ fontOld = SelectObject(hdc, font);
+			SetBkColor(hdc, GetSysColor(COLOR_MENUBAR));
+			SetTextColor(hdc, RGB(0, 0, 0));
+
+			RECT rect = { 0, 0, FAITH_WIDTH, FAITH_HEIGHT };
+			HBRUSH brush = CreateSolidBrush(GetSysColor(COLOR_MENUBAR));
+			FillRect(hdc, &rect, brush);
+			DeleteObject(brush);
+
+			char text[0xFFF] = { 0 };
+			char player[0xFFF] = { 0 };
+			if (process) {
+				ReadBuffer(process, GetPointer(process, 5, faith_base, 0xCC, 0x4A4, 0x214, 0x00), player, sizeof(player));
+				ReadBuffer(process, GetPointer(process, 4, faith_base, 0xCC, 0x70, 0xF4), player, 8);
+			}
+
+			rect.left = 10;
+			strcpy(text, "x\ny\nz\n\nvx\nvy\nvz\n\nhs\nvs\n\ns\nh\n\nrx\nry");
+			DrawTextA(hdc, text, -1, &rect, DT_LEFT | DT_WORDBREAK);
+
+			float vx = *(float *)&player[0x100], vy = *(float *)&player[0x104], vz = *(float *)&player[0x108];
+
+			sprintf(text,
+				/* x  */ "%.3f\n"\
+				/* y  */ "%.3f\n"\
+				/* z  */ "%.3f\n\n"\
+				/* vx */ "%.3f\n"\
+				/* vy */ "%.3f\n"\
+				/* vz */ "%.3f\n\n"\
+				/* hs */ "%.3f\n"\
+				/* vs */ "%.3f\n\n"\
+				/* s  */ "%d\n"\
+				/* h  */ "%d\n\n"\
+				/* rx */ "%.2f\n"\
+				/* ry */ "%.2f\n"\
+				, *(float *)&player[0xE8], *(float *)&player[0xEC], *(float *)&player[0xF0], vx, vy, vz, sqrt(vx * vx + vy * vy) * 0.036, fabs(vz) * 0.036, *(byte *)&player[0x68], *(DWORD *)&player[0x2B8], IntToDegrees(*(int *)player), IntToDegrees(*(int *)&player[4]));
+
+			rect.right -= 25;
+			DrawTextA(hdc, text, -1, &rect, DT_RIGHT | DT_WORDBREAK);
+			
+			BitBlt(hdcOld, 0, 0, FAITH_WIDTH, FAITH_HEIGHT, hdc, 0, 0, SRCCOPY);
+			SelectObject(hdc, fontOld);
+			SelectObject(hdc, hbmOld);
+			DeleteObject(font);
+			DeleteObject(hbm);
+			DeleteDC(hdc);
+			ReleaseDC(hWnd, hdcOld);
+
+			break;
+		}
+	}
+
+	return DefWindowProc(hWnd, message, wParam, lParam);
 }
 
 LRESULT CALLBACK EditProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -718,7 +802,7 @@ INT_PTR CALLBACK MouseDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 			break;
 	}
 
-	return (INT_PTR)FALSE;
+	return FALSE;
 }
 
 INT_PTR CALLBACK KeyboardDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -759,7 +843,7 @@ INT_PTR CALLBACK KeyboardDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 					EnableWindow(GetDlgItem(hDlg, IDC_KEYBOARD_ALIAS), TRUE);
 					SetDlgItemText(hDlg, IDC_KEYBOARD_ALIAS, ki->alias);
 
-					break;
+					return TRUE;
 				}
 				case IDC_KEYBOARD_OK: case 1: {
 					if (ki->keycode) {
@@ -779,7 +863,7 @@ INT_PTR CALLBACK KeyboardDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 			break;
 	}
 
-	return (INT_PTR)FALSE;
+	return FALSE;
 }
 
 INT_PTR CALLBACK FrameDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -1036,5 +1120,5 @@ INT_PTR CALLBACK FrameDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 			EndDialog(hDlg, 0);
 			break;
 	}
-	return (INT_PTR)FALSE;
+	return FALSE;
 }
