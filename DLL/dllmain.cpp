@@ -263,6 +263,11 @@ DWORD WINAPI GetTickCount64Hook() {
 }
 
 BOOL WINAPI QueryPerformanceFrequencyHook(LARGE_INTEGER *f) {
+	static bool hooked = false;
+	if (!hooked) {
+		InterlockedExchange8((char *)&hooked, 1);
+		hooked = MainHooks();
+	}
 	f->QuadPart = (ULONG64)1e7;
 	return TRUE;
 }
@@ -358,11 +363,18 @@ void MainThread() {
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
 
+	TrampolineHook(QueryPerformanceFrequencyHook, QueryPerformanceFrequency, (void **)&QueryPerformanceFrequencyOriginal);
+}
+
+bool MainHooks() {
 	MODULEENTRY32 mod = GetModuleInfoByName(GetCurrentProcessId(), L"mirrorsedge.exe");
 	DWORD addr = 0;
 
 	// 0x40418E
-	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\xDD\x05\x00\x00\x00\x00\x5E\xDD\x15", "xx????xxx") + 7;
+	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\xDD\x05\x00\x00\x00\x00\x5E\xDD\x15", "xx????xxx");
+	if (!addr) return false;
+
+	addr += 7;
 	printf("Times: %x\n", addr);
 	// 0x1F723E0
 	time.delta = (double *)(*(DWORD *)(addr + 2));
@@ -377,6 +389,11 @@ void MainThread() {
 	time.frequency = (double *)(*(DWORD *)(addr + 49));
 	printf("- Frequency: %x\n", (DWORD)time.frequency);
 
+	// 0x404140
+	addr -= 78;
+	printf("UpdateEngine: %x\n", addr);
+	SetJMP(UpdateEngineHook, (void *)addr, 0);
+
 	// 0x417A4F
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\xA3\x00\x00\x00\x00\x57\x53\xFF", "x????xxx");
 	printf("Input: %x\n", addr);
@@ -388,7 +405,7 @@ void MainThread() {
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x6A\x01\xC1\xE8\x02", "xxxxx");
 	printf("Rendering: %x\n", addr);
 	base.rendering = addr;
-	
+
 	// 0x11132C9
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\xA3\x00\x00\x00\x00\x8D\x14\x98", "x????xxx");
 	printf("Strings: %x\n", addr);
@@ -398,15 +415,9 @@ void MainThread() {
 
 	SetJMP(GetTickCountHook, GetTickCount, 0);
 	SetJMP(GetTickCount64Hook, GetTickCount64, 0);
-	TrampolineHook(QueryPerformanceFrequencyHook, QueryPerformanceFrequency, (void **)&QueryPerformanceFrequencyOriginal);
 	TrampolineHook(QueryPerformanceCounterHook, QueryPerformanceCounter, (void **)&QueryPerformanceCounterOriginal);
 	SetJMP(randHook, GetProcAddress(GetModuleHandleA("msvcr80.dll"), "rand"), 0);
-	
-	// 0x404140
-	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x55\x8B\xEC\x83\xEC\x18\xF6\x05", "xxxxxxxx");
-	printf("UpdateEngine: %x\n", addr);
-	SetJMP(UpdateEngineHook, (void *)addr, 0);
-	
+
 	// 0x18AF75F
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x51\x8B\x4C\x24\x5C\x52\x8B\x54\x24\x4C\x51", "xxxxxxxxxxx");
 	printf("CreateDevice: %x\n", addr);
@@ -444,6 +455,8 @@ void MainThread() {
 	QueryPerformanceFrequencyHook(&qpc.frequency);
 	*time.frequency = 1.0 / (double)qpc.frequency.QuadPart;
 	QueryPerformanceFrequencyOriginal(&qpc.frequency);
+
+	return true;
 }
 
 EXPORT void AddControl(DWORD c) {
