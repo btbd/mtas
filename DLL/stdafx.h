@@ -9,6 +9,7 @@
 #include <d3d9.h>
 #include <d3dx9.h>
 #include <dinput.h>
+#include <winternl.h>
 
 #pragma comment(lib, "d3d9.lib")
 #pragma comment(lib, "d3dx9.lib")
@@ -331,13 +332,14 @@ static struct {
 } qpc = { 0 };
 
 static struct {
-	DWORD faith, engine, input, rendering, strings;
+	DWORD faith, engine, input, rendering, animation, strings, check;
 } base = { 0 };
 
 DWORD GetStringId(wchar_t *str);
 wchar_t *GetStringById(DWORD id);
 void ExecuteCommand(wchar_t *);
 void DisableRendering(bool);
+bool MainHooks();
 
 static void(__thiscall *PlayerHandlerOriginal)(void *, float, int);
 static int(__thiscall *InputHandlerOriginal)(void *, int, int, int, int, int, float, int);

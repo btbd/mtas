@@ -618,9 +618,13 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 				case ID__CLEAR: {
 					DWORD base = CallRead(dll.GetDemoFrames);
 					for (int i = -1; (i = SendMessage(frames_list, LVM_GETNEXTITEM, i, LVNI_SELECTED)) != -1;) {
-						FRAME f = { 0 };
-						WriteBuffer(process, (LPVOID)(base + (i * sizeof(FRAME))), (char *)&f, sizeof(FRAME));
-						UpdateFrame(i, &f);
+						FRAME f = { 0 }, c;
+						LPVOID a = (LPVOID)(base + (i * sizeof(FRAME)));
+						ReadBuffer(process, a, (char *)&c, sizeof(FRAME));
+						if (memcmp(&f, &c, sizeof(FRAME)) != 0) {
+							WriteBuffer(process, a, (char *)&f, sizeof(FRAME));
+							UpdateFrame(i, &f);
+						}
 					}
 				}
 			}

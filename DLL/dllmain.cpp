@@ -1,7 +1,9 @@
 #include "stdafx.h"
 
+NTSTATUS(WINAPI *QueryInformationThread)(HANDLE, DWORD, PVOID, ULONG, PULONG);
+
 bool disable_rendering = false;
-DWORD control = 0, processed_frames = 0;
+DWORD control = 0, processed_frames = 0, main_thread = 0;
 double delay = DELAY;
 
 struct {
@@ -48,24 +50,20 @@ void UpdateEngineHook() {
 
 	++processed_frames;
 
+	if (!main_thread) main_thread = GetCurrentThreadId();
 	*time.delta = DELAY;
 	*time.last = *time.current = 0;
 
 	if (*demo.command && demo.jump) {
-		SetThreadPriority(GetCurrentThread(), 2);
-
 		DoFrameInput(demo.frame);
 		if (demo.frame++ >= demo.jump - 1) {
+			DisableRendering(false);
 			control |= CONTROL_PAUSE;
 			demo.jump = 0;
-		}
-
-		if (demo.frame >= demo.jump - 1) {
+		} else if (demo.frame >= demo.jump - 1) {
 			DisableRendering(false);
 		}
 	} else {
-		SetThreadPriority(GetCurrentThread(), 0);
-
 		if (*demo.command) {
 			if (demo.frame == demo.frames->size()) {
 				demo.frames->push_back({ 0 });
@@ -308,44 +306,90 @@ BOOL WINAPI PeekMessageWHook(LPMSG msg, HWND window, UINT min, UINT max, UINT re
 }
 
 void WINAPI SleepHook(DWORD t) {
-	if (disable_rendering) return;
+	if (disable_rendering && GetCurrentThreadId() == main_thread) return;
 	SleepOriginal(t);
 }
 
 HRESULT WINAPI PresentHook(IDirect3DDevice9 *device, RECT *src, RECT *dest, HWND window, RGNDATA *dirty) {
 	if (disable_rendering) {
 		device->Clear(1, (D3DRECT *)dest, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 0, 0, 0), 0, 0);
-
-		LPD3DXFONT font;
-		D3DXCreateFontA(device, 20, 0, FW_BOLD, 1, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Arial", &font);
-		char text[0xFF] = { 0 };
-		sprintf(text, "Reverting to frame %d", demo.jump);
-		RECT r = { 10, 10 };
-		font->DrawTextA(0, text, strlen(text), &r, DT_NOCLIP, D3DCOLOR_ARGB(255, 255, 255, 255));
-		font->Release();
 	}
 
 	return PresentOriginal(device, src, dest, window, dirty);
 }
 
+void SetNOPS(void *addr, DWORD size) {
+	for (DWORD i = 0; i < size; ++i) ((byte *)addr)[i] = 0x90;
+}
+
 void DisableRendering(bool disable) {
-	static byte bytes[22] = { 0 };
-	static byte nops[22] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+	static byte b0[22] = { 0 };
+	static byte b1[4] = { 0 };
+
+	if (disable_rendering == disable) return;
 
 	disable_rendering = disable;
 	if (disable) {
-		if (!*bytes) {
-			VirtualProtect((void *)base.rendering, sizeof(bytes), PAGE_EXECUTE_READWRITE, (DWORD *)bytes);
-			memcpy(bytes, (void *)base.rendering, sizeof(bytes));
+		if (!*b0) {
+			VirtualProtect((void *)base.rendering, sizeof(b0), PAGE_EXECUTE_READWRITE, (DWORD *)b0);
+			VirtualProtect((void *)base.animation, sizeof(b1), PAGE_EXECUTE_READWRITE, (DWORD *)b0);
+			memcpy(b0, (void *)base.rendering, sizeof(b0));
+			memcpy(b1, (void *)base.animation, sizeof(b1));
 		}
 
-		memcpy((void *)base.rendering, nops, sizeof(bytes));
+		SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
+		HANDLE thread = OpenThread(THREAD_ALL_ACCESS, 0, main_thread);
+		SetPriorityClass(thread, REALTIME_PRIORITY_CLASS);
+		SetThreadPriority(thread, THREAD_PRIORITY_TIME_CRITICAL);
+		CloseHandle(thread);
+
+		SetNOPS((void *)base.rendering, sizeof(b0));
+		memcpy((void *)base.animation, "\x8B\xE5\x5D\xC3", sizeof(b1));
 		ExecuteCommand(L"set GameViewportClient bDisableWorldRendering 1");
 		ExecuteCommand(L"set UIScene bDisableWorldRendering 1");
+
+		THREADENTRY32 entry = { 0 };
+		entry.dwSize = sizeof(THREADENTRY32);
+
+		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, GetCurrentProcessId());
+		MODULEENTRY32 modules[] = {
+			GetModuleInfoByName(GetCurrentProcessId(), L"winmm.dll"), 
+			GetModuleInfoByName(GetCurrentProcessId(), L"dsound.dll"),
+			GetModuleInfoByName(GetCurrentProcessId(), L"dinput8.dll"),
+			GetModuleInfoByName(GetCurrentProcessId(), L"nvcuda.dll"),
+		};
+		if (Thread32First(snapshot, &entry)) {
+			do {
+				if (entry.th32OwnerProcessID == GetCurrentProcessId()) {
+					HANDLE thread = OpenThread(THREAD_ALL_ACCESS, 0, entry.th32ThreadID);
+					DWORD start = 0;
+					QueryInformationThread(thread, (THREADINFOCLASS)9, &start, 4, 0);
+					if (start == base.check) {
+						SuspendThread(thread);
+					} else {
+						for (DWORD i = 0; i < sizeof(modules) / sizeof(modules[0]); ++i) {
+							if ((DWORD)modules[i].modBaseAddr <= start && start <= (DWORD)modules[i].modBaseAddr + modules[i].modBaseSize) {
+								SuspendThread(thread);
+								break;
+							}
+						}
+					}
+					CloseHandle(thread);
+				}
+			} while (Thread32Next(snapshot, &entry));
+		}
+		CloseHandle(snapshot);
 	} else {
-		memcpy((void *)base.rendering, bytes, sizeof(bytes));
+		SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
+		HANDLE thread = OpenThread(THREAD_ALL_ACCESS, 0, main_thread);
+		SetPriorityClass(thread, HIGH_PRIORITY_CLASS);
+		SetThreadPriority(thread, THREAD_PRIORITY_HIGHEST);
+		CloseHandle(thread);
+		memcpy((void *)base.rendering, b0, sizeof(b0));
+		memcpy((void *)base.animation, b1, sizeof(b1));
 		ExecuteCommand(L"set GameViewportClient bDisableWorldRendering 0");
 		ExecuteCommand(L"set UIScene bDisableWorldRendering 0");
+		ResumeProcess(GetCurrentProcessId());
 	}
 }
 
@@ -363,7 +407,17 @@ void MainThread() {
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
 
+	*(DWORD *)&QueryInformationThread = (DWORD)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread");
 	TrampolineHook(QueryPerformanceFrequencyHook, QueryPerformanceFrequency, (void **)&QueryPerformanceFrequencyOriginal);
+}
+
+DWORD(WINAPI *WaitForSingleObjectOriginal)(HANDLE a, DWORD b);
+DWORD WINAPI WaitForSingleObjectHook(HANDLE a, DWORD b) {
+	if (*demo.command && demo.jump && demo.frame > 0 && GetCurrentThreadId() == main_thread) {
+		return 0;
+	}
+
+	return WaitForSingleObjectOriginal(a, b);
 }
 
 bool MainHooks() {
@@ -406,6 +460,16 @@ bool MainHooks() {
 	printf("Rendering: %x\n", addr);
 	base.rendering = addr;
 
+	// 0x404D3B
+	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x8B\x0D\x00\x00\x00\x00\xDD\x05\x00\x00\x00\x00\x8B\x01\x8B\x90\xB4", "xx????xx????xxxxx");
+	printf("Animation: %x\n", addr);
+	base.animation = addr;
+
+	// 0x1661BF0
+	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x83\x3D\x00\x00\x00\x00\x00\xC7\x05\x00\x00\x00\x00\x01\x00\x00\x00\x74\x20", "xx????xxx????xxxxxx");
+	printf("Check: %x\n", addr);
+	base.check = addr;
+
 	// 0x11132C9
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\xA3\x00\x00\x00\x00\x8D\x14\x98", "x????xxx");
 	printf("Strings: %x\n", addr);
@@ -438,9 +502,9 @@ bool MainHooks() {
 	printf("MouseHandler: %x\n", addr);
 	TrampolineHook(MouseHandlerHook, (void *)addr, (void **)&MouseHandlerOriginal);
 
-	TrampolineHook(GetKeyStateHook, (void *)GetKeyState, (void **)&GetKeyStateOriginal);
-	TrampolineHook(PeekMessageWHook, (void *)PeekMessageW, (void **)&PeekMessageWOriginal);
-	TrampolineHook(SleepHook, (void *)Sleep, (void **)&SleepOriginal);
+	TrampolineHook(GetKeyStateHook, GetKeyState, (void **)&GetKeyStateOriginal);
+	TrampolineHook(PeekMessageWHook, PeekMessageW, (void **)&PeekMessageWOriginal);
+	TrampolineHook(WaitForSingleObjectHook, WaitForSingleObject, (void **)&WaitForSingleObjectOriginal);
 	TrampolineHook(PresentHook, (void *)GetD3D9Exports()[D3D9_EXPORT_PRESENT], (void **)&PresentOriginal);
 
 	// 0xFF5D7D
@@ -479,9 +543,9 @@ EXPORT void Wait() {
 }
 
 EXPORT void NewDemo() {
+	*demo.command = 0;
 	RemoveControl(CONTROL_PAUSE);
 	Wait();
-	*demo.command = 0;
 	demo.frame = demo.jump = 0;
 	demo.frames->clear();
 	demo.frames->shrink_to_fit();
@@ -533,27 +597,34 @@ EXPORT void SaveDemo(char *path) {
 EXPORT void StartDemo() {
 	RemoveControl(CONTROL_PAUSE);
 	Wait();
-	demo.frame = demo.jump = 0;
 	ExecuteCommand(demo.command);
+	demo.frame = demo.jump = 0;
 }
 
 EXPORT void GotoFrame(DWORD frame) {
 	if (*demo.command && frame < demo.frames->size() && frame != demo.frame) {
 		DWORD c = control;
-		control = 0;
 
-		Wait();
 		if (frame == 0) {
+			control = 0;
+			Wait();
 			ExecuteCommand(demo.command);
 			demo.frame = demo.jump = 0;
 		} else {
-			DisableRendering(true);
 			if (frame < demo.frame) {
+				control = 0;
+				Wait();
+				DisableRendering(true);
 				ExecuteCommand(demo.command);
 				demo.frame = 0;
+				demo.jump = frame;
+			} else {
+				demo.jump = frame;
+				control = 0;
+				DisableRendering(true);
 			}
-			demo.jump = frame;
-			while (demo.jump) Sleep(1);
+			
+			while (demo.jump) Sleep(100);
 		}
 
 		control = (c | CONTROL_PAUSE);
