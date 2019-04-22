@@ -411,7 +411,6 @@ void MainThread() {
 	TrampolineHook(QueryPerformanceFrequencyHook, QueryPerformanceFrequency, (void **)&QueryPerformanceFrequencyOriginal);
 }
 
-DWORD(WINAPI *WaitForSingleObjectOriginal)(HANDLE a, DWORD b);
 DWORD WINAPI WaitForSingleObjectHook(HANDLE a, DWORD b) {
 	if (*demo.command && demo.jump && demo.frame > 0 && GetCurrentThreadId() == main_thread) {
 		return 0;
