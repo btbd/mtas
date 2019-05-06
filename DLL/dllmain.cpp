@@ -711,6 +711,15 @@ bool MainHooks() {
 	printf("UpdateEngine: %x\n", addr);
 	SetJMP(UpdateEngineHook, (void *)addr, 0);
 
+	// 0xaca76b
+	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x68\x00\x00\x00\x00\x51\xFF\x15\x00\x00\x00\x00\x83\xC4\x08\x85\xC0\x75\x73", "x????xxx????xxxxxxx");
+	printf("StartupMovie access: %x\n", addr);
+	addr = *(DWORD *)(addr + 1);
+	// 0x1bf5de8
+	printf("- Str: %x\n", addr);
+	VirtualProtect((void *)addr, 2, PAGE_EXECUTE_READWRITE, &mod.dwSize);
+	*(short *)addr = 0;
+
 	// 0x1FFBCA4
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x8B\x0D\x00\x00\x00\x00\x83\xC4\x24\x8B\xF0\x57", "xx????xxxxxx");
 	base.uworld = *(DWORD *)(addr + 2);
