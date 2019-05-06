@@ -22,7 +22,12 @@ When compiling either the DLL or EXE to test your contributions, be sure that th
 
 ```Project -> Properties -> Configuration Properties -> C/C++ -> Code Generation -> Runtime Library```
 
-In addition, be sure the compiler configuration is set to `Release` instead of `Debug` for faster optimization, and be sure that the compiler configuration is set to `x86` because Mirror's Edge is a 32-bit application.
+In addition, be sure the compiler configuration is set to:
+- `Release` instead of `Debug` for faster optimization.
+	
+- `x86` because Mirror's Edge is a 32-bit application.
+
+- Unicode for the character set.
 
 For the DLL, you will need to include the DirectX 9 Library. You can download the SDK from <a href="https://www.microsoft.com/en-us/download/confirmation.aspx?id=6812">here</a>.
 
