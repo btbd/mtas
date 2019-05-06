@@ -26,6 +26,9 @@
 #define CONTROL_PAUSE_AIR (1 << 5)
 #define CONTROL_PAUSE_WALLRUN (1 << 6)
 #define CONTROL_PAUSE_WALLCLIMB (1 << 7)
+#define GOTO_FULL (0)
+#define GOTO_FAST (1 << 0)
+#define GOTO_NO_STREAM (1 << 1)
 
 static wchar_t *KEYS[] = {
 	L"", // 0
@@ -288,7 +291,7 @@ static wchar_t *KEYS[] = {
 #define AddExport(e) dll.e = base + ((DWORD)GetProcAddress((HMODULE)offset, #e) - offset);
 
 static struct {
-	DWORD AddControl, RemoveControl, GetControl, Wait, NewDemo, LoadDemo, SaveDemo, StartDemo, GotoFrame, GetDemoCommand, GetDemoFrame, GetDemoFrameCount, GetDemoFrames, SetTimescale, GetTimescale;
+	DWORD AddControl, RemoveControl, GetControl, Wait, NewDemo, LoadDemo, SaveDemo, StartDemo, GotoFrame, GetDemoCommand, GetDemoFrame, GetDemoFrameCount, GetDemoFrames, SetTimescale, GetTimescale, AddGotoFlag, RemoveGotoFlag, GetGotoFlags;
 } dll = { 0 };
 
 #define MOUSE_INPUT_X (0)

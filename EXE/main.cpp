@@ -7,6 +7,7 @@ DWORD focus_frame = 0, faith_base = 0;
 HWND window = 0, frames_list = 0, command_input = 0;
 WNDPROC edit_proc = 0, drop_proc = 0;
 char current_demo[0xFF] = { 0 };
+char dll_path[0xFF] = { 0 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 	CreateMutexA(0, FALSE, "Local\\MTAS.exe");
@@ -23,7 +24,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	freopen("CONOUT$", "w", stderr);
 #endif
 
-	if (!LoadLibraryA("DLL.dll")) {
+	GetFullPathNameA("DLL.dll", MAX_PATH, dll_path, 0);
+	if (!LoadLibraryA(dll_path)) {
 		MessageBoxA(0, "Failed to load DLL.dll", "Error", 0);
 		exit(1);
 	}
@@ -67,11 +69,8 @@ void Listener() {
 				CloseHandle(process);
 				HANDLE p = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
 
-				char path[MAX_PATH] = { 0 };
-				GetFullPathNameA("DLL.dll", MAX_PATH, path, NULL);
-
-				LPVOID arg = (LPVOID)VirtualAllocEx(p, NULL, strlen(path) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-				WriteProcessMemory(p, arg, path, strlen(path) + 1, 0);
+				LPVOID arg = (LPVOID)VirtualAllocEx(p, 0, strlen(dll_path) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+				WriteProcessMemory(p, arg, dll_path, strlen(dll_path) + 1, 0);
 				HANDLE thread = CreateRemoteThread(p, 0, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA"), arg, 0, 0);
 				WaitForSingleObject(thread, INFINITE);
 				CloseHandle(thread);
@@ -95,6 +94,9 @@ void Listener() {
 				AddExport(GetDemoFrames);
 				AddExport(SetTimescale);
 				AddExport(GetTimescale);
+				AddExport(AddGotoFlag);
+				AddExport(RemoveGotoFlag);
+				AddExport(GetGotoFlags);
 
 				process = p;
 
@@ -109,7 +111,7 @@ void Listener() {
 				CheckDlgButton(window, IDC_PAUSE_AIR, control & CONTROL_PAUSE_AIR);
 				CheckDlgButton(window, IDC_PAUSE_WALLRUN, control & CONTROL_PAUSE_WALLRUN);
 				CheckDlgButton(window, IDC_PAUSE_WALLCLIMB, control & CONTROL_PAUSE_WALLCLIMB);
-			
+
 				control = CallRead(dll.GetTimescale);
 				float scale = *(float *)&control;
 				HWND hDlg = window;
@@ -129,8 +131,12 @@ void Listener() {
 					CheckTimescale(ID_TIMESCALE_4);
 				}
 
+				control = CallRead(dll.GetGotoFlags);
+				CheckDlgButton(window, IDC_GOTO_FAST, control & GOTO_FAST);
+				CheckDlgButton(window, IDC_GOTO_NO_STREAM, control & GOTO_NO_STREAM);
+
 				MODULEENTRY32 mod = GetModuleInfoByName(pid, L"mirrorsedge.exe");
-				faith_base = ReadInt(process, (void *)((DWORD)ProcessFindPattern(process, mod.modBaseAddr, mod.modBaseSize, "\x89\x0D\x00\x00\x00\x00\xB9\x00\x00\x00\x00\xFF", "xx????x????x") + 2));	
+				faith_base = ReadInt(process, (void *)((DWORD)ProcessFindPattern(process, mod.modBaseAddr, mod.modBaseSize, "\x89\x0D\x00\x00\x00\x00\xB9\x00\x00\x00\x00\xFF", "xx????x????x") + 2));
 			}
 		} else {
 			pid = 0;
@@ -138,6 +144,11 @@ void Listener() {
 				CloseHandle(process);
 				process = 0;
 			}
+
+			SetWindowTextA(window, "MTAS");
+			faith_base = *current_demo = 0;
+			memset(&dll, 0, sizeof(dll));
+			ListView_DeleteAllItems(frames_list);
 		}
 
 		Sleep(500);
@@ -196,6 +207,8 @@ void Update() {
 
 			if (control & CONTROL_PAUSE) {
 				SetDlgItemText(window, IDC_PAUSE, L"▶");
+			} else {
+				SetDlgItemText(window, IDC_PAUSE, L"||");
 			}
 		}
 
@@ -258,8 +271,8 @@ void AddFrame(FRAME *frame) {
 void SetFocusFrame(DWORD frame) {
 	DWORD old = focus_frame;
 	focus_frame = frame;
-	ListView_RedrawItems(frames_list, old, focus_frame);
 	ListView_EnsureVisible(frames_list, focus_frame, false);
+	ListView_RedrawItems(frames_list, min(old, focus_frame), max(old, focus_frame));
 }
 
 void Call(DWORD addr, DWORD arg) {
@@ -380,6 +393,9 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			AddElementById(IDC_PAUSE_AIR, ALIGN_RIGHT);
 			AddElementById(IDC_PAUSE_WALLRUN, ALIGN_RIGHT);
 			AddElementById(IDC_PAUSE_WALLCLIMB, ALIGN_RIGHT);
+			AddElementById(IDC_STATIC_GOTO, ALIGN_RIGHT);
+			AddElementById(IDC_GOTO_FAST, ALIGN_RIGHT);
+			AddElementById(IDC_GOTO_NO_STREAM, ALIGN_RIGHT);
 			AddElementById(IDC_STOP, ALIGN_RIGHT | ALIGN_BOTTOM);
 			AddElementById(IDC_RECORD, ALIGN_RIGHT | ALIGN_BOTTOM);
 
@@ -439,20 +455,21 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					of.lpstrFile = name;
 					of.nMaxFile = 0xFF;
 					of.Flags = OFN_FILEMUSTEXIST;
-					GetOpenFileNameA(&of);
-					void *arg = VirtualAllocEx(process, 0, sizeof(name), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-					WriteBuffer(process, arg, name, sizeof(name));
-					Call(dll.LoadDemo, (DWORD)arg);
-					VirtualFreeEx(process, arg, 0, MEM_RELEASE);
-					strcpy(current_demo, name);
-					PathStripPathA(name);
-					wchar_t title[0xFF] = { 0 };
-					wsprintf(title, L"MTAS - %S", name);
-					SetWindowText(hDlg, title);
-					ReadBuffer(process, (void *)CallRead(dll.GetDemoCommand), (char *)title, sizeof(title));
-					SetWindowText(command_input, title);
-					SetDlgItemText(hDlg, IDC_PAUSE, L"||");
-					SetFocusFrame(0);
+					if (GetOpenFileNameA(&of)) {
+						void *arg = VirtualAllocEx(process, 0, sizeof(name), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+						WriteBuffer(process, arg, name, sizeof(name));
+						Call(dll.LoadDemo, (DWORD)arg);
+						VirtualFreeEx(process, arg, 0, MEM_RELEASE);
+						strcpy(current_demo, name);
+						PathStripPathA(name);
+						wchar_t title[0xFF] = { 0 };
+						wsprintf(title, L"MTAS - %S", name);
+						SetWindowText(hDlg, title);
+						ReadBuffer(process, (void *)CallRead(dll.GetDemoCommand), (char *)title, sizeof(title));
+						SetWindowText(command_input, title);
+						SetDlgItemText(hDlg, IDC_PAUSE, L"||");
+						SetFocusFrame(0);
+					}
 					break;
 				}
 				case ID_FILE_SAVE: {
@@ -472,16 +489,17 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					sf.lpstrFile = name;
 					sf.nMaxFile = 0xFF;
 					sf.Flags = OFN_FILEMUSTEXIST;
-					GetSaveFileNameA(&sf);
-					void *arg = VirtualAllocEx(process, 0, 0xFF, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-					WriteBuffer(process, arg, name, 0xFF);
-					Call(dll.SaveDemo, (DWORD)arg);
-					VirtualFreeEx(process, arg, 0, MEM_RELEASE);
-					strcpy(current_demo, name);
-					PathStripPathA(name);
-					char title[0xFF] = { 0 };
-					sprintf(title, "MTAS - %s", name);
-					SetWindowTextA(hDlg, title);
+					if (GetSaveFileNameA(&sf)) {
+						void *arg = VirtualAllocEx(process, 0, 0xFF, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+						WriteBuffer(process, arg, name, 0xFF);
+						Call(dll.SaveDemo, (DWORD)arg);
+						VirtualFreeEx(process, arg, 0, MEM_RELEASE);
+						strcpy(current_demo, name);
+						PathStripPathA(name);
+						char title[0xFF] = { 0 };
+						sprintf(title, "MTAS - %s", name);
+						SetWindowTextA(hDlg, title);
+					}
 					break;
 				}
 				case IDC_START:
@@ -525,8 +543,14 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 				case IDC_PAUSE_WALLRUN:
 					Call(IsDlgButtonChecked(hDlg, IDC_PAUSE_WALLRUN) ? dll.AddControl : dll.RemoveControl, CONTROL_PAUSE_WALLRUN);
 					break;
-				case IDC_PAUSE_WALLCLIMB :
+				case IDC_PAUSE_WALLCLIMB:
 					Call(IsDlgButtonChecked(hDlg, IDC_PAUSE_WALLCLIMB) ? dll.AddControl : dll.RemoveControl, CONTROL_PAUSE_WALLCLIMB);
+					break;
+				case IDC_GOTO_FAST:
+					Call(IsDlgButtonChecked(hDlg, IDC_GOTO_FAST) ? dll.AddGotoFlag : dll.RemoveGotoFlag, GOTO_FAST);
+					break;
+				case IDC_GOTO_NO_STREAM:
+					Call(IsDlgButtonChecked(hDlg, IDC_GOTO_NO_STREAM) ? dll.AddGotoFlag : dll.RemoveGotoFlag, GOTO_NO_STREAM);
 					break;
 				case IDC_STOP:
 					WriteShort(process, (LPVOID)CallRead(dll.GetDemoCommand), 0);
@@ -541,7 +565,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 				}
 				case ID_FR:
 					SetForegroundWindow(FindWindowExA(0, 0, "LaunchUnrealUWindowsClient", 0));
-					Sleep(1000);
+					Sleep(200);
 					Call(dll.RemoveControl, CONTROL_PAUSE | CONTROL_ADVANCE);
 					SetDlgItemText(hDlg, IDC_PAUSE, L"||");
 					break;

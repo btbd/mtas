@@ -14,6 +14,7 @@
 #pragma comment(lib, "d3d9.lib")
 #pragma comment(lib, "d3dx9.lib")
 #pragma comment(lib, "dinput8.lib")
+#pragma comment(lib, "synchronization.lib")
 
 #include "memory.h"
 #define EXPORT __declspec(dllexport)
@@ -34,6 +35,9 @@ extern "C" {
 	EXPORT void GetDemoFrames(DWORD *);
 	EXPORT void SetTimescale(float);
 	EXPORT void GetTimescale(float *);
+	EXPORT void AddGotoFlag(DWORD);
+	EXPORT void RemoveGotoFlag(DWORD);
+	EXPORT void GetGotoFlags(DWORD *);
 }
 
 #define CONTROL_PLAY (0)
@@ -45,6 +49,10 @@ extern "C" {
 #define CONTROL_PAUSE_AIR (1 << 5)
 #define CONTROL_PAUSE_WALLRUN (1 << 6)
 #define CONTROL_PAUSE_WALLCLIMB (1 << 7)
+#define GOTO_FULL (0)
+#define GOTO_FAST (1 << 0)
+#define GOTO_NO_STREAM (1 << 1)
+#define UpdateRenderFunc() rendering.Disable = (goto_flags & GOTO_FAST) ? FastDisableRendering : FullDisableRendering;
 
 static wchar_t *KEYS[] = {
 	L"", // 0
@@ -332,13 +340,14 @@ static struct {
 } qpc = { 0 };
 
 static struct {
-	DWORD faith, engine, input, rendering, animation, strings, check;
+	DWORD faith, engine, input, strings, check, uworld, r0, r1, r2;
 } base = { 0 };
 
 DWORD GetStringId(wchar_t *str);
 wchar_t *GetStringById(DWORD id);
 void ExecuteCommand(wchar_t *);
-void DisableRendering(bool);
+void FullDisableRendering(bool);
+void FastDisableRendering(bool);
 bool MainHooks();
 
 static void(__thiscall *PlayerHandlerOriginal)(void *, float, int);
@@ -349,8 +358,13 @@ static void(*GetEngineBaseOriginal)();
 static short GetKeyStateKeyboard[0xFF] = { 0 };
 static short(WINAPI *GetKeyStateOriginal)(int);
 static void(*CreateDeviceOriginal)();
+static int(__thiscall *LevelLoadOriginal)(void *, int, __int64);
+static DWORD(WINAPI *WaitForSingleObjectOriginal)(HANDLE a, DWORD b);
 static BOOL(WINAPI *QueryPerformanceFrequencyOriginal)(LARGE_INTEGER *);
 static BOOL(WINAPI *QueryPerformanceCounterOriginal)(LARGE_INTEGER *);
 static BOOL(WINAPI *PeekMessageWOriginal)(LPMSG, HWND, UINT, UINT, UINT);
 static void(WINAPI *SleepOriginal)(DWORD);
 static HRESULT(WINAPI *PresentOriginal)(IDirect3DDevice9 *, RECT *, RECT *, HWND, RGNDATA *);
+static int *(__thiscall *LevelStreamOriginal)(DWORD);
+static void *(__thiscall *CopyActorInfoOriginal)(DWORD *, float *, void *, int, int, int);
+static int(__thiscall *UpdateObjectOriginal)(void *, int);
