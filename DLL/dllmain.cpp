@@ -116,7 +116,7 @@ void UpdateEngineHook() {
 
 		streaming.live = false;
 		if (demo.jump) rendering.Disable(true);
-	} 
+	}
 
 leave:
 	*time.last = *time.current = 0;
@@ -934,7 +934,7 @@ EXPORT void GotoFrame(DWORD frame) {
 				rendering.Disable(true);
 			}
 		}
-		
+
 		control = (c | CONTROL_PAUSE);
 		Unlock();
 

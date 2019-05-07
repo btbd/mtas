@@ -47,9 +47,9 @@ static wchar_t *KEYS[] = {
 	L"Enter", // d
 	L"", // e
 	L"", // f
-	L"Shift", // 10
-	L"Control", // 11
-	L"Menu", // 12
+	L"", // 10
+	L"", // 11
+	L"", // 12
 	L"Pause", // 13
 	L"CAPSLOCK", // 14
 	L"", // 15
