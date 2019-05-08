@@ -1,7 +1,5 @@
 #include "stdafx.h"
 
-NTSTATUS(WINAPI *QueryInformationThread)(HANDLE, DWORD, PVOID, ULONG, PULONG);
-
 DWORD control = 0, processed_frames = 0, main_thread = 0, goto_flags = GOTO_FAST | GOTO_NO_STREAM;
 double delay = DELAY;
 CRITICAL_SECTION mutex = { 0 };
@@ -69,9 +67,6 @@ void DoFrameInput(DWORD index) {
 }
 
 DWORD GetSublevelState(DWORD id) {
-	/* DWORD ptr = *(DWORD *)base.uworld;
-	ptr = *(DWORD *)(ptr + 0x50);
-	ptr = **(DWORD **)(ptr + 0x3C); */
 	DWORD ptr = **(DWORD **)(*(DWORD *)(*(DWORD *)base.uworld + 0x50) + 0x3C);
 	DWORD n = *(DWORD *)(ptr + 0xBF0);
 	DWORD base = *(DWORD *)(ptr + 0xBEC);
@@ -102,6 +97,7 @@ void UpdateEngineHook() {
 
 		for (DWORD id : *streaming.load) {
 			if (!(GetSublevelState(id) & 1)) {
+				ExecuteCommand(L"set LevelStreaming bShouldBlockOnLoad 1");
 				goto leave;
 			}
 		}
@@ -332,11 +328,6 @@ DWORD WINAPI GetTickCount64Hook() {
 }
 
 BOOL WINAPI QueryPerformanceFrequencyHook(LARGE_INTEGER *f) {
-	static bool hooked = false;
-	if (!InterlockedExchangeAdd8((char *)&hooked, 0)) {
-		InterlockedExchange8((char *)&hooked, 1);
-		hooked = MainHooks();
-	}
 	f->QuadPart = (ULONG64)1e7;
 	return TRUE;
 }
@@ -415,7 +406,7 @@ DWORD WINAPI WaitForSingleObjectHook(HANDLE a, DWORD b) {
 }
 
 int __fastcall UpdateObjectHook(void *this_, void *idle_, int a2) {
-	static wchar_t ignore_strs[][0xFF] = { L"TdAI_RunnerVisionEffect", L"SpotLightMovable", L"Trigger_LOS", L"TdPlayerCamera", L"TdAIManager", L"TdAIVoiceOverManager", L"TdSPStoryGame", L"TdPathLimits", L"TdAIAnimationController", L"AITeam", L"CameraActor", L"TdLookAtPoint", L"VolumeTimer", L"TdCoverController", L"DefaultPhysicsVolume", L"KActor", L"SkeletalMeshActorMAT", L"TdPlayerController", L"BroadcastHandler", L"TdGameReplicationInfo", L"TdPlayerReplicationInfo", L"TdInventoryManager", L"TdSPHUD", L"RB_CylindricalForceActor", L"TdTrigger", L"LensFlareSource", L"MatineeActor", L"SceneCaptureReflectActor", L"PostProcessVolume", L"HeightFog", L"TdEmitter", L"DecalManager", L"TdEmitterPool", L"TdDirectionalFlareEmitter", L"CrowdAgent", L"CrowdReplicationActor", L"CrowdAttractor", L"PrefabInstance", L"Emitter" };
+	static wchar_t ignore_strs[][0xFF] = { L"TdAI_RunnerVisionEffect", L"SpotLightMovable", L"Trigger_LOS", L"TdPlayerCamera", L"TdAIManager", L"TdAIVoiceOverManager", L"TdSPStoryGame", L"TdPathLimits", L"TdAIAnimationController", L"AITeam", L"CameraActor", L"TdLookAtPoint", L"VolumeTimer", L"TdCoverController", L"DefaultPhysicsVolume", L"KActor", L"TdPlayerController", L"BroadcastHandler", L"TdGameReplicationInfo", L"TdPlayerReplicationInfo", L"TdInventoryManager", L"TdSPHUD", L"RB_CylindricalForceActor", L"TdTrigger", L"LensFlareSource", L"MatineeActor", L"SceneCaptureReflectActor", L"PostProcessVolume", L"HeightFog", L"TdEmitter", L"DecalManager", L"TdEmitterPool", L"TdDirectionalFlareEmitter", L"CrowdAgent", L"CrowdReplicationActor", L"CrowdAttractor", L"PrefabInstance", L"Emitter" };
 	static DWORD ignore_ids[sizeof(ignore_strs) / sizeof(ignore_strs[0])] = { 0 };
 
 	if ((DWORD)this_ == base.faith) {
@@ -437,15 +428,13 @@ int __fastcall UpdateObjectHook(void *this_, void *idle_, int a2) {
 }
 
 int __fastcall LevelLoadHook(void *this_, void *idle_, int a2, __int64 a3) {
-	base.faith = 0;
-
 	Lock();
+	base.faith = 0;
 	streaming.live = false;
 	streaming.load->clear();
 	streaming.load->shrink_to_fit();
 	streaming.unload->clear();
 	streaming.unload->shrink_to_fit();
-	Unlock();
 
 	if (demo.reset) {
 		demo.frame = 0;
@@ -455,9 +444,12 @@ int __fastcall LevelLoadHook(void *this_, void *idle_, int a2, __int64 a3) {
 		if (demo.jump) {
 			rendering.Disable(true);
 		}
+		Unlock();
 		return ret;
 	} else {
-		return LevelLoadOriginal(this_, a2, a3);;
+		int ret = LevelLoadOriginal(this_, a2, a3);
+		Unlock();
+		return ret;
 	}
 }
 
@@ -540,6 +532,7 @@ void FullDisableRendering(bool disable) {
 			GetModuleInfoByName(GetCurrentProcessId(), L"nvcuda.dll"),
 			GetModuleInfoByName(GetCurrentProcessId(), L"physxcore.dll")
 		};
+
 		if (Thread32First(snapshot, &entry)) {
 			do {
 				if (entry.th32OwnerProcessID == GetCurrentProcessId()) {
@@ -678,20 +671,61 @@ void MainThread() {
 
 	rendering.disabled = false;
 	InitializeCriticalSection(&mutex);
-
 	*(DWORD *)&QueryInformationThread = (DWORD)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread");
 	TrampolineHook(QueryPerformanceFrequencyHook, QueryPerformanceFrequency, (void **)&QueryPerformanceFrequencyOriginal);
+
+	while (!FindWindowA("LaunchUnrealUWindowsClient", 0)) {
+		Sleep(1);
+	}
+
+	THREADENTRY32 entry = { 0 };
+	entry.dwSize = sizeof(THREADENTRY32);
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+	if (Thread32First(snapshot, &entry)) {
+		do {
+			if (entry.th32OwnerProcessID == GetCurrentProcessId() && entry.th32ThreadID != GetCurrentThreadId()) {
+				HANDLE thread = OpenThread(THREAD_ALL_ACCESS, 0, entry.th32ThreadID);
+				CloseHandle(thread);
+			}
+		} while (Thread32Next(snapshot, &entry));
+	}
+	CloseHandle(snapshot);
+
+	MainHooks();
+
+	wchar_t startup[] = L"StartupMovie";
+	DWORD base = 0;
+	MEMORY_BASIC_INFORMATION mi = { 0 };
+	for (VirtualQuery((void *)base, &mi, sizeof(mi));;) {
+		base += mi.RegionSize;
+		VirtualQuery((void *)base, &mi, sizeof(mi));
+		if (base == (DWORD)mi.BaseAddress + mi.RegionSize) break;
+		if ((mi.State & (MEM_COMMIT | MEM_RESERVE)) && (mi.Protect & PAGE_READWRITE)) {
+			char *buffer = (char *)malloc(mi.RegionSize);
+			ReadBuffer(GetCurrentProcess(), mi.BaseAddress, buffer, mi.RegionSize);
+			if (buffer) {
+				for (DWORD i = 0; i < mi.RegionSize - sizeof(startup); ++i) {
+					wchar_t *addr = (wchar_t *)&buffer[i];
+					if (wcscmp(startup, addr) == 0 && (addr = (wchar_t *)(i + (DWORD)mi.BaseAddress)) != startup) {
+						*addr = 0;
+						i += sizeof(startup);
+					}
+				}
+
+				free(buffer);
+			}
+		}
+	}
+
+	ResumeProcess(GetCurrentProcessId());
 }
 
-bool MainHooks() {
+void MainHooks() {
 	MODULEENTRY32 mod = GetModuleInfoByName(GetCurrentProcessId(), L"mirrorsedge.exe");
 	DWORD addr = 0;
 
 	// 0x40418E
-	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\xDD\x05\x00\x00\x00\x00\x5E\xDD\x15", "xx????xxx");
-	if (!addr) return false;
-
-	addr += 7;
+	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\xDD\x05\x00\x00\x00\x00\x5E\xDD\x15", "xx????xxx") + 7;
 	printf("Times: %x\n", addr);
 	// 0x1F723E0
 	time.delta = (double *)(*(DWORD *)(addr + 2));
@@ -710,15 +744,6 @@ bool MainHooks() {
 	addr -= 78;
 	printf("UpdateEngine: %x\n", addr);
 	SetJMP(UpdateEngineHook, (void *)addr, 0);
-
-	// 0xaca76b
-	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x68\x00\x00\x00\x00\x51\xFF\x15\x00\x00\x00\x00\x83\xC4\x08\x85\xC0\x75\x73", "x????xxx????xxxxxxx");
-	printf("StartupMovie access: %x\n", addr);
-	addr = *(DWORD *)(addr + 1);
-	// 0x1bf5de8
-	printf("- Str: %x\n", addr);
-	VirtualProtect((void *)addr, 2, PAGE_EXECUTE_READWRITE, &mod.dwSize);
-	*(short *)addr = 0;
 
 	// 0x1FFBCA4
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x8B\x0D\x00\x00\x00\x00\x83\xC4\x24\x8B\xF0\x57", "xx????xxxxxx");
@@ -823,8 +848,6 @@ bool MainHooks() {
 	QueryPerformanceFrequencyHook(&qpc.frequency);
 	*time.frequency = 1.0 / (double)qpc.frequency.QuadPart;
 	QueryPerformanceFrequencyOriginal(&qpc.frequency);
-
-	return true;
 }
 
 EXPORT void AddControl(DWORD c) {
@@ -847,7 +870,7 @@ EXPORT void Wait() {
 }
 
 EXPORT void NewDemo() {
-	RemoveControl(CONTROL_PAUSE);
+	RemoveControl(CONTROL_PAUSE | CONTROL_ADVANCE);
 	Lock();
 	*demo.command = 0;
 	demo.frame = demo.jump = 0;
@@ -904,7 +927,7 @@ EXPORT void SaveDemo(char *path) {
 }
 
 EXPORT void StartDemo() {
-	RemoveControl(CONTROL_PAUSE);
+	RemoveControl(CONTROL_PAUSE | CONTROL_ADVANCE);
 	Lock();
 	ExecuteCommand(demo.command);
 	demo.frame = demo.jump = 0;
@@ -935,7 +958,7 @@ EXPORT void GotoFrame(DWORD frame) {
 			}
 		}
 
-		control = (c | CONTROL_PAUSE);
+		control = ((c & ~CONTROL_ADVANCE) | CONTROL_PAUSE);
 		Unlock();
 
 		LARGE_INTEGER t0, t1;

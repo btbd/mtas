@@ -1,4 +1,4 @@
-# Mirror's Edge TAS Tool
+# Mirror's Edge TAS Tool (WIP)
 
 A program for making tool-assisted Mirror's Edge speedruns.
 

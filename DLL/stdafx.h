@@ -348,8 +348,9 @@ wchar_t *GetStringById(DWORD id);
 void ExecuteCommand(wchar_t *);
 void FullDisableRendering(bool);
 void FastDisableRendering(bool);
-bool MainHooks();
+void MainHooks();
 
+static NTSTATUS(WINAPI *QueryInformationThread)(HANDLE, DWORD, PVOID, ULONG, PULONG);
 static void(__thiscall *PlayerHandlerOriginal)(void *, float, int);
 static int(__thiscall *InputHandlerOriginal)(void *, int, int, int, int, int, float, int);
 static int(__thiscall *MouseHandlerOriginal)(int, int, int, int, int, float, float, int);

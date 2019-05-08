@@ -44,9 +44,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	window = CreateDialog(GetModuleHandle(0), MAKEINTRESOURCE(IDD_WINDOW), CreateWindow(L"mtas", L"", 0, 0, 0, 0, 0, 0, 0, wcex.hInstance, 0), DlgProc);
 	ShowWindow(window, SW_SHOW);
-
-	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Listener, 0, 0, 0);
+	
 	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Update, 0, 0, 0);
+	SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, 0, Listener, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
 	MSG msg = { 0 };
 	while (GetMessage(&msg, 0, 0, 0)) {
@@ -57,101 +57,90 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	return 0;
 }
 
-void Listener() {
-	DWORD pid = 0;
+void WaitForExit() {
+	WaitForSingleObject(process, INFINITE);
+	CloseHandle(process);
+	SetWindowTextA(window, "MTAS");
+	faith_base = *current_demo = 0;
+	memset(&dll, 0, sizeof(dll));
+	ListView_DeleteAllItems(frames_list);
+	process = 0;
+}
 
-	for (;;) {
-		PROCESSENTRY32 entry = GetProcessInfoByName(L"MirrorsEdge.exe");
-		DWORD t = entry.th32ProcessID;
-		if (t) {
-			if (pid != t) {
-				pid = t;
-				CloseHandle(process);
-				HANDLE p = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
+void CALLBACK Listener(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime) {
+	if (!process) {
+		DWORD pid = GetProcessInfoByName(L"MirrorsEdge.exe").th32ProcessID;
+		if (pid) {
+			HANDLE p = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
 
-				LPVOID arg = (LPVOID)VirtualAllocEx(p, 0, strlen(dll_path) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-				WriteProcessMemory(p, arg, dll_path, strlen(dll_path) + 1, 0);
-				HANDLE thread = CreateRemoteThread(p, 0, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA"), arg, 0, 0);
-				WaitForSingleObject(thread, INFINITE);
-				CloseHandle(thread);
-				VirtualFreeEx(p, arg, 0, MEM_RELEASE);
+			LPVOID arg = (LPVOID)VirtualAllocEx(p, 0, strlen(dll_path) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+			WriteProcessMemory(p, arg, dll_path, strlen(dll_path) + 1, 0);
+			HANDLE thread = CreateRemoteThread(p, 0, 0, (LPTHREAD_START_ROUTINE)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA"), arg, 0, 0);
+			WaitForSingleObject(thread, INFINITE);
+			CloseHandle(thread);
+			VirtualFreeEx(p, arg, 0, MEM_RELEASE);
 
-				DWORD base = (DWORD)GetModuleInfoByName(pid, L"DLL.dll").modBaseAddr;
-				DWORD offset = (DWORD)GetModuleHandleA("DLL.dll");
+			DWORD base = (DWORD)GetModuleInfoByName(pid, L"DLL.dll").modBaseAddr;
+			DWORD offset = (DWORD)GetModuleHandleA("DLL.dll");
 
-				AddExport(AddControl);
-				AddExport(RemoveControl);
-				AddExport(GetControl);
-				AddExport(Wait);
-				AddExport(NewDemo);
-				AddExport(LoadDemo);
-				AddExport(SaveDemo);
-				AddExport(StartDemo);
-				AddExport(GotoFrame);
-				AddExport(GetDemoCommand);
-				AddExport(GetDemoFrame);
-				AddExport(GetDemoFrameCount);
-				AddExport(GetDemoFrames);
-				AddExport(SetTimescale);
-				AddExport(GetTimescale);
-				AddExport(AddGotoFlag);
-				AddExport(RemoveGotoFlag);
-				AddExport(GetGotoFlags);
+			AddExport(AddControl);
+			AddExport(RemoveControl);
+			AddExport(GetControl);
+			AddExport(Wait);
+			AddExport(NewDemo);
+			AddExport(LoadDemo);
+			AddExport(SaveDemo);
+			AddExport(StartDemo);
+			AddExport(GotoFrame);
+			AddExport(GetDemoCommand);
+			AddExport(GetDemoFrame);
+			AddExport(GetDemoFrameCount);
+			AddExport(GetDemoFrames);
+			AddExport(SetTimescale);
+			AddExport(GetTimescale);
+			AddExport(AddGotoFlag);
+			AddExport(RemoveGotoFlag);
+			AddExport(GetGotoFlags);
 
-				process = p;
+			process = p;
 
-				wchar_t command[0xFF] = { 0 };
-				ReadBuffer(process, (void *)CallRead(dll.GetDemoCommand), (char *)command, sizeof(command));
-				SetDlgItemText(window, IDC_COMMAND, command);
+			wchar_t command[0xFF] = { 0 };
+			ReadBuffer(process, (void *)CallRead(dll.GetDemoCommand), (char *)command, sizeof(command));
+			SetDlgItemText(window, IDC_COMMAND, command);
 
-				DWORD control = CallRead(dll.GetControl);
-				CheckDlgButton(window, IDC_RECORD, control & CONTROL_RECORD);
-				CheckDlgButton(window, IDC_PAUSE_CHANGE, control & CONTROL_PAUSE_CHANGE);
-				CheckDlgButton(window, IDC_PAUSE_GROUND, control & CONTROL_PAUSE_GROUND);
-				CheckDlgButton(window, IDC_PAUSE_AIR, control & CONTROL_PAUSE_AIR);
-				CheckDlgButton(window, IDC_PAUSE_WALLRUN, control & CONTROL_PAUSE_WALLRUN);
-				CheckDlgButton(window, IDC_PAUSE_WALLCLIMB, control & CONTROL_PAUSE_WALLCLIMB);
+			DWORD control = CallRead(dll.GetControl);
+			CheckDlgButton(window, IDC_RECORD, control & CONTROL_RECORD);
+			CheckDlgButton(window, IDC_PAUSE_CHANGE, control & CONTROL_PAUSE_CHANGE);
+			CheckDlgButton(window, IDC_PAUSE_GROUND, control & CONTROL_PAUSE_GROUND);
+			CheckDlgButton(window, IDC_PAUSE_AIR, control & CONTROL_PAUSE_AIR);
+			CheckDlgButton(window, IDC_PAUSE_WALLRUN, control & CONTROL_PAUSE_WALLRUN);
+			CheckDlgButton(window, IDC_PAUSE_WALLCLIMB, control & CONTROL_PAUSE_WALLCLIMB);
 
-				control = CallRead(dll.GetTimescale);
-				float scale = *(float *)&control;
-				HWND hDlg = window;
-				if (scale == 0.1f) {
-					CheckTimescale(ID_TIMESCALE_10);
-				} else if (scale == 0.25f) {
-					CheckTimescale(ID_TIMESCALE_25);
-				} else if (scale == 0.5f) {
-					CheckTimescale(ID_TIMESCALE_50);
-				} else if (scale == 0.75f) {
-					CheckTimescale(ID_TIMESCALE_75);
-				} else if (scale == 1) {
-					CheckTimescale(ID_TIMESCALE_1);
-				} else if (scale == 2) {
-					CheckTimescale(ID_TIMESCALE_2);
-				} else if (scale == 4) {
-					CheckTimescale(ID_TIMESCALE_4);
-				}
-
-				control = CallRead(dll.GetGotoFlags);
-				CheckDlgButton(window, IDC_GOTO_FAST, control & GOTO_FAST);
-				CheckDlgButton(window, IDC_GOTO_NO_STREAM, control & GOTO_NO_STREAM);
-
-				MODULEENTRY32 mod = GetModuleInfoByName(pid, L"mirrorsedge.exe");
-				faith_base = ReadInt(process, (void *)((DWORD)ProcessFindPattern(process, mod.modBaseAddr, mod.modBaseSize, "\x89\x0D\x00\x00\x00\x00\xB9\x00\x00\x00\x00\xFF", "xx????x????x") + 2));
-			}
-		} else {
-			pid = 0;
-			if (process) {
-				CloseHandle(process);
-				process = 0;
+			control = CallRead(dll.GetTimescale);
+			float scale = *(float *)&control;
+			HWND hDlg = window;
+			if (scale == 0.1f) {
+				CheckTimescale(ID_TIMESCALE_10);
+			} else if (scale == 0.25f) {
+				CheckTimescale(ID_TIMESCALE_25);
+			} else if (scale == 0.5f) {
+				CheckTimescale(ID_TIMESCALE_50);
+			} else if (scale == 0.75f) {
+				CheckTimescale(ID_TIMESCALE_75);
+			} else if (scale == 1) {
+				CheckTimescale(ID_TIMESCALE_1);
+			} else if (scale == 2) {
+				CheckTimescale(ID_TIMESCALE_2);
+			} else if (scale == 4) {
+				CheckTimescale(ID_TIMESCALE_4);
 			}
 
-			SetWindowTextA(window, "MTAS");
-			faith_base = *current_demo = 0;
-			memset(&dll, 0, sizeof(dll));
-			ListView_DeleteAllItems(frames_list);
+			control = CallRead(dll.GetGotoFlags);
+			CheckDlgButton(window, IDC_GOTO_FAST, control & GOTO_FAST);
+			CheckDlgButton(window, IDC_GOTO_NO_STREAM, control & GOTO_NO_STREAM);
+
+			CreateThread(0, 0, (LPTHREAD_START_ROUTINE)WaitForExit, 0, 0, 0);
 		}
-
-		Sleep(500);
 	}
 }
 
@@ -514,8 +503,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 						wchar_t text[0xFF] = { 0 };
 						GetWindowText(button, text, 0xFF);
 						if (*text == L'▶') {
-							Call(dll.RemoveControl, CONTROL_ADVANCE);
-							Call(dll.RemoveControl, CONTROL_PAUSE);
+							Call(dll.RemoveControl, CONTROL_PAUSE | CONTROL_ADVANCE);
 							SetWindowText(button, L"||");
 						} else {
 							Call(dll.AddControl, CONTROL_PAUSE);
@@ -713,6 +701,11 @@ LRESULT CALLBACK FaithProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam
 			char text[0xFFF] = { 0 };
 			char player[0xFFF] = { 0 };
 			if (process) {
+				if (!faith_base) {
+					MODULEENTRY32 mod = GetModuleInfoByName(GetProcessId(process), L"mirrorsedge.exe");
+					faith_base = ReadInt(process, (void *)((DWORD)ProcessFindPattern(process, mod.modBaseAddr, mod.modBaseSize, "\x89\x0D\x00\x00\x00\x00\xB9\x00\x00\x00\x00\xFF", "xx????x????x") + 2));
+				}
+				
 				ReadBuffer(process, GetPointer(process, 5, faith_base, 0xCC, 0x4A4, 0x214, 0x00), player, sizeof(player));
 				ReadBuffer(process, GetPointer(process, 4, faith_base, 0xCC, 0x70, 0xF4), player, 8);
 			}

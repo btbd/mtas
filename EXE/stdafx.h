@@ -334,7 +334,7 @@ typedef struct {
 #define AddElement(hwnd, flags) { RECT s = { 0 }; GetClientRect(hDlg, &s); RECT r = { 0 }; GetClientRect(hwnd, &r); MapWindowPoints(hwnd, GetParent(hwnd), (LPPOINT)&r, 2); elements.push_back(ELEMENT{ hwnd, r, s, flags }); }
 #define AddElementById(id, flags) AddElement(GetDlgItem(hDlg, id), flags)
 
-void Listener();
+void CALLBACK Listener(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime);
 void Update();
 void UpdateFrame(DWORD index, FRAME *frame);
 void SetFocusFrame(DWORD frame);
