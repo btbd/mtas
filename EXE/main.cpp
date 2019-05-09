@@ -1,6 +1,6 @@
 ﻿#include "stdafx.h"
 
-// #define DEBUG
+#define DEBUG
 
 HANDLE process = 0;
 DWORD focus_frame = 0, faith_base = 0;
@@ -46,10 +46,41 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	ShowWindow(window, SW_SHOW);
 	
 	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Update, 0, 0, 0);
+	Listener(0, 0, 0, 0, 0, 0, 0);
 	SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, 0, Listener, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
 	MSG msg = { 0 };
 	while (GetMessage(&msg, 0, 0, 0)) {
+		if (msg.message == WM_KEYDOWN) {
+			if (msg.hwnd == frames_list) {
+				if (GetKeyState(VK_CONTROL) < 0) {
+					switch (msg.wParam) {
+						case 0x43:
+							SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__COPY, 0), 0);
+							break;
+						case 0x56:
+							SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__PASTE, 0), 0);
+							break;
+						case 0x58:
+							SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__CUT, 0), 0);
+							break;
+					}
+				} else {
+					switch (msg.wParam) {
+						case VK_DELETE:
+							SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__CLEAR, 0), 0);
+							break;
+					}
+				}
+			}
+
+			switch (msg.wParam) {
+				case VK_F1:
+					SendMessage(window, WM_COMMAND, MAKEWPARAM(IDC_ADVANCE, 0), 0);
+					break;
+			}
+		}
+
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
@@ -591,7 +622,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 						UpdateFrame(i, &f);
 					}
 
-					CopyFramesToClipboard(&frames);
+					if (frames.size() > 0) CopyFramesToClipboard(&frames);
 					break;
 				}
 				case ID__COPY: {
@@ -603,7 +634,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 						frames.push_back(f);
 					}
 
-					CopyFramesToClipboard(&frames);
+					if (frames.size() > 0) CopyFramesToClipboard(&frames);
 					break;
 				}
 				case ID__PASTE: {
