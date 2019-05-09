@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-DWORD control = 0, processed_frames = 0, main_thread = 0, goto_flags = GOTO_FAST | GOTO_NO_STREAM;
+volatile DWORD control = 0, processed_frames = 0, main_thread = 0, goto_flags = GOTO_FAST | GOTO_NO_STREAM;
 double delay = DELAY;
 CRITICAL_SECTION mutex = { 0 };
 
@@ -21,14 +21,6 @@ struct {
 	bool disabled = false;
 	void(*Disable)(bool) = FastDisableRendering;
 } rendering;
-
-void Lock() {
-	EnterCriticalSection(&mutex);
-}
-
-void Unlock() {
-	LeaveCriticalSection(&mutex);
-}
 
 void SetNOPS(void *addr, DWORD size) {
 	DWORD p;
@@ -163,7 +155,7 @@ leave:
 				break;
 			}
 
-			Sleep(0);
+			SleepOriginal(0);
 		}
 
 		QueryPerformanceCounterOriginal(&last.time);
@@ -685,6 +677,7 @@ void MainThread() {
 		do {
 			if (entry.th32OwnerProcessID == GetCurrentProcessId() && entry.th32ThreadID != GetCurrentThreadId()) {
 				HANDLE thread = OpenThread(THREAD_ALL_ACCESS, 0, entry.th32ThreadID);
+				SuspendThread(thread);
 				CloseHandle(thread);
 			}
 		} while (Thread32Next(snapshot, &entry));
@@ -851,11 +844,15 @@ void MainHooks() {
 }
 
 EXPORT void AddControl(DWORD c) {
-	control |= c;
+	TryLock(
+		control |= c;
+	);
 }
 
 EXPORT void RemoveControl(DWORD c) {
-	control &= ~c;
+	TryLock(
+		control &= ~c;
+	);
 }
 
 EXPORT void GetControl(DWORD *c) {
@@ -994,13 +991,17 @@ EXPORT void GetTimescale(float *scale) {
 }
 
 EXPORT void AddGotoFlag(DWORD flag) {
-	goto_flags |= flag;
-	UpdateRenderFunc();
+	TryLock(
+		goto_flags |= flag;
+		UpdateRenderFunc();
+	);
 }
 
 EXPORT void RemoveGotoFlag(DWORD flag) {
-	goto_flags &= ~flag;
-	UpdateRenderFunc();
+	TryLock(
+		goto_flags &= ~flag;
+		UpdateRenderFunc();
+	);
 }
 
 EXPORT void GetGotoFlags(DWORD *out) {

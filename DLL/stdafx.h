@@ -53,6 +53,9 @@ extern "C" {
 #define GOTO_FAST (1 << 0)
 #define GOTO_NO_STREAM (1 << 1)
 #define UpdateRenderFunc() rendering.Disable = (goto_flags & GOTO_FAST) ? FastDisableRendering : FullDisableRendering;
+#define Lock() { EnterCriticalSection(&mutex); }
+#define Unlock() { LeaveCriticalSection(&mutex); }
+#define TryLock(body) { bool __unlock = TryEnterCriticalSection(&mutex); { body }; if (__unlock) { Unlock(); }}
 
 static wchar_t *KEYS[] = {
 	L"", // 0
