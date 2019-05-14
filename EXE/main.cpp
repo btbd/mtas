@@ -1,6 +1,6 @@
 ﻿#include "stdafx.h"
 
-#define DEBUG
+// #define DEBUG
 
 HANDLE process = 0;
 DWORD focus_frame = 0, faith_base = 0;
