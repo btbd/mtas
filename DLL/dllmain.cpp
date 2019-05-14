@@ -2,6 +2,7 @@
 
 volatile DWORD control = 0, processed_frames = 0, main_thread = 0, goto_flags = GOTO_FAST | GOTO_NO_STREAM;
 double delay = DELAY;
+std::vector<wchar_t *> command_queue;
 CRITICAL_SECTION mutex = { 0 };
 
 struct {
@@ -83,6 +84,14 @@ void UpdateEngineHook() {
 	Lock();
 	qpc.ticks += 1000000;
 	++processed_frames;
+
+	for (wchar_t *command : command_queue) {
+		ExecuteCommand(command);
+		free(command);
+	}
+
+	command_queue.clear();
+	command_queue.shrink_to_fit();
 
 	if (streaming.live && !(goto_flags & GOTO_NO_STREAM)) {
 		rendering.Disable(false);
@@ -247,7 +256,7 @@ __declspec(naked) void CreateDeviceHook() {
 }
 
 void ExecuteCommand(wchar_t *command) {
-	if (base.engine) {
+	if (command && base.engine) {
 		wchar_t c[0xFF] = { 0 };
 		wsprintf(c, L"%s\r\n", command);
 
@@ -261,7 +270,7 @@ void ExecuteCommand(wchar_t *command) {
 		*(DWORD *)(a3 + 4) = wcslen(c);
 		*(DWORD *)a3 = (DWORD)c;
 
-		ExecuteCommandOriginal((int)this_, (void **)a2, (int)a3, 1);
+		ExecuteCommandHook((int)this_, 0, (void **)a2, (int)a3, 1);
 
 		free(this_);
 		free(a2);
@@ -395,6 +404,19 @@ DWORD WINAPI WaitForSingleObjectHook(HANDLE a, DWORD b) {
 	}
 
 	return WaitForSingleObjectOriginal(a, b);
+}
+
+void **__fastcall ExecuteCommandHook(int this_, void *idle_, void **a2, int a3, int a4) {
+	static wchar_t command[0xFF] = { 0 };
+	if (a3) {
+		wchar_t *c = *(wchar_t **)a3;
+		if (c) {
+			wcsncpy(command, c, 0xFF);
+			PostMessage(FindWindowA("mtas", ""), UPDATE_COMMAND, (WPARAM)(DWORD)command, 0);
+		}
+	}
+
+	return ExecuteCommandOriginal(this_, a2, a3, a4);
 }
 
 int __fastcall UpdateObjectHook(void *this_, void *idle_, int a2) {
@@ -816,7 +838,7 @@ void MainHooks() {
 	// 0xfa99d0
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x6A\xFF\x68\x00\x00\x00\x00\x64\xA1\x00\x00\x00\x00\x50\x83\xEC\x28\x53\x55\x56\x57\xA1\x00\x00\x00\x00\x33\xC4\x50\x8D\x44\x24\x3C\x64\xA3\x00\x00\x00\x00\x89\x4C\x24\x18\x33\xDB\x89\x5C\x24\x14\x39\x99\xCC\x02\x00\x00", "xxx????xxxxxxxxxxxxxxx????xxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
 	printf("ExecuteCommand: %x\n", addr);
-	*(DWORD *)&ExecuteCommandOriginal = addr;
+	TrampolineHook(ExecuteCommandHook, (void *)addr, (void **)&ExecuteCommandOriginal);
 
 	// 0x11c6a70
 	addr = (DWORD)FindPattern(mod.modBaseAddr, mod.modBaseSize, "\x6A\xFF\x68\x00\x00\x00\x00\x64\xA1\x00\x00\x00\x00\x50\x81\xEC\x00\x00\x00\x00\x53\x55\x56\x57\xA1\x00\x00\x00\x00\x33\xC4\x50\x8D\x84\x24\x00\x00\x00\x00\x64\xA3\x00\x00\x00\x00\x8B\xE9\x89\x6C\x24\x00\x00\xFF\x89", "???????xxxxxxxxx?xxxxxxxx????xxxxxx?xxxxxxxxxxxxxx??xx");
@@ -1006,6 +1028,13 @@ EXPORT void RemoveGotoFlag(DWORD flag) {
 
 EXPORT void GetGotoFlags(DWORD *out) {
 	if (out) *out = goto_flags;
+}
+
+EXPORT void PushCommand(wchar_t *command) {
+	Lock();
+	command_queue.push_back(_wcsdup(command));
+	VirtualFree(command, 0, MEM_RELEASE);
+	Unlock();
 }
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {

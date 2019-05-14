@@ -38,8 +38,10 @@ extern "C" {
 	EXPORT void AddGotoFlag(DWORD);
 	EXPORT void RemoveGotoFlag(DWORD);
 	EXPORT void GetGotoFlags(DWORD *);
+	EXPORT void PushCommand(wchar_t *);
 }
 
+#define UPDATE_COMMAND 661
 #define CONTROL_PLAY (0)
 #define CONTROL_PAUSE (1 << 0)
 #define CONTROL_ADVANCE (1 << 1)
@@ -351,6 +353,7 @@ wchar_t *GetStringById(DWORD id);
 void ExecuteCommand(wchar_t *);
 void FullDisableRendering(bool);
 void FastDisableRendering(bool);
+void **__fastcall ExecuteCommandHook(int this_, void *idle_, void **a2, int a3, int a4);
 void MainHooks();
 
 static NTSTATUS(WINAPI *QueryInformationThread)(HANDLE, DWORD, PVOID, ULONG, PULONG);

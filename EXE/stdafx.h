@@ -12,6 +12,7 @@
 #include "memory.h"
 #include "resource.h"
 
+#define UPDATE_COMMAND 661
 #define CLIPBOARD_TYPE (CF_PRIVATEFIRST + 0x22)
 #define UncheckTimescale(id) CheckMenuItem(GetMenu(hDlg), id, MF_UNCHECKED);
 #define CheckTimescale(id) UncheckTimescale(ID_TIMESCALE_10); UncheckTimescale(ID_TIMESCALE_25); UncheckTimescale(ID_TIMESCALE_50); UncheckTimescale(ID_TIMESCALE_75); UncheckTimescale(ID_TIMESCALE_1); UncheckTimescale(ID_TIMESCALE_2); UncheckTimescale(ID_TIMESCALE_4); CheckMenuItem(GetMenu(hDlg), id, MF_CHECKED);
@@ -291,7 +292,7 @@ static wchar_t *KEYS[] = {
 #define AddExport(e) dll.e = base + ((DWORD)GetProcAddress((HMODULE)offset, #e) - offset);
 
 static struct {
-	DWORD AddControl, RemoveControl, GetControl, Wait, NewDemo, LoadDemo, SaveDemo, StartDemo, GotoFrame, GetDemoCommand, GetDemoFrame, GetDemoFrameCount, GetDemoFrames, SetTimescale, GetTimescale, AddGotoFlag, RemoveGotoFlag, GetGotoFlags;
+	DWORD AddControl, RemoveControl, GetControl, Wait, NewDemo, LoadDemo, SaveDemo, StartDemo, GotoFrame, GetDemoCommand, GetDemoFrame, GetDemoFrameCount, GetDemoFrames, SetTimescale, GetTimescale, AddGotoFlag, RemoveGotoFlag, GetGotoFlags, PushCommand;
 } dll = { 0 };
 
 #define MOUSE_INPUT_X (0)
@@ -316,6 +317,10 @@ typedef struct {
 		wchar_t alias[0x20];
 	} keys[100];
 } FRAME;
+
+typedef struct {
+	short original, replace;
+} TRANSLATOR_RULE;
 
 #define FAITH_WIDTH (220)
 #define FAITH_HEIGHT (385)
@@ -345,3 +350,5 @@ void AddFrame(FRAME *frame);
 LRESULT CALLBACK FaithProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK FrameDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK CommandsProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK TranslatorProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);

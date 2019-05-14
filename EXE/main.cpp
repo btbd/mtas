@@ -1,10 +1,10 @@
 ﻿#include "stdafx.h"
 
-// #define DEBUG
+#define DEBUG
 
 HANDLE process = 0;
 DWORD focus_frame = 0, faith_base = 0;
-HWND window = 0, frames_list = 0, command_input = 0;
+HWND window = 0, frames_list = 0, command_input = 0, command_window = 0;
 WNDPROC edit_proc = 0, drop_proc = 0;
 char current_demo[0xFF] = { 0 };
 char dll_path[0xFF] = { 0 };
@@ -51,33 +51,59 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	MSG msg = { 0 };
 	while (GetMessage(&msg, 0, 0, 0)) {
-		if (msg.message == WM_KEYDOWN) {
-			if (msg.hwnd == frames_list) {
-				if (GetKeyState(VK_CONTROL) < 0) {
-					switch (msg.wParam) {
-						case 0x43:
-							SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__COPY, 0), 0);
-							break;
-						case 0x56:
-							SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__PASTE, 0), 0);
-							break;
-						case 0x58:
-							SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__CUT, 0), 0);
-							break;
-					}
-				} else {
-					switch (msg.wParam) {
-						case VK_DELETE:
-							SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__CLEAR, 0), 0);
-							break;
+		switch (msg.message) {
+			case UPDATE_COMMAND:
+				if (command_window) {
+					wchar_t buffer[0xFF] = { 0 };
+					ReadBuffer(process, (void *)msg.wParam, (char *)buffer, sizeof(buffer) - 2);
+					wchar_t *nl = wcsstr(buffer, L"\r\n");
+					if (nl) *nl = 0;
+					if (*buffer) {
+						HWND list = GetDlgItem(command_window, IDC_COMMANDS_LIST);
+						int len = GetWindowTextLength(list) + 1;
+						wchar_t *text = (wchar_t *)calloc((2 * len) + sizeof(buffer) + 6, 1);
+						if (text) {
+							if (len > 1) {
+								GetWindowText(list, text, len);
+								wcscat(text, L"\r\n");
+							}
+							wcscat(text, buffer);
+							SetWindowText(list, text);
+							free(text);
+						}
 					}
 				}
-			}
+				break;
+			case WM_KEYDOWN: {
+				if (msg.hwnd == frames_list) {
+					if (GetKeyState(VK_CONTROL) < 0) {
+						switch (msg.wParam) {
+							case 0x43:
+								SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__COPY, 0), 0);
+								break;
+							case 0x56:
+								SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__PASTE, 0), 0);
+								break;
+							case 0x58:
+								SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__CUT, 0), 0);
+								break;
+						}
+					} else {
+						switch (msg.wParam) {
+							case VK_DELETE:
+								SendMessage(window, WM_COMMAND, MAKEWPARAM(ID__CLEAR, 0), 0);
+								break;
+						}
+					}
+				}
 
-			switch (msg.wParam) {
-				case VK_F1:
-					SendMessage(window, WM_COMMAND, MAKEWPARAM(IDC_ADVANCE, 0), 0);
-					break;
+				switch (msg.wParam) {
+					case VK_F1:
+						SendMessage(window, WM_COMMAND, MAKEWPARAM(IDC_ADVANCE, 0), 0);
+						break;
+				}
+
+				break;
 			}
 		}
 
@@ -132,6 +158,7 @@ void CALLBACK Listener(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG
 			AddExport(AddGotoFlag);
 			AddExport(RemoveGotoFlag);
 			AddExport(GetGotoFlags);
+			AddExport(PushCommand);
 
 			process = p;
 
@@ -488,6 +515,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 						ReadBuffer(process, (void *)CallRead(dll.GetDemoCommand), (char *)title, sizeof(title));
 						SetWindowText(command_input, title);
 						SetDlgItemText(hDlg, IDC_PAUSE, L"||");
+						ListView_DeleteAllItems(frames_list);
 						SetFocusFrame(0);
 					}
 					break;
@@ -506,6 +534,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					OPENFILENAMEA sf = { 0 };
 					sf.lStructSize = sizeof(sf);
 					sf.lpstrFilter = "*.demo";
+					sf.lpstrDefExt = "demo";
 					sf.lpstrFile = name;
 					sf.nMaxFile = 0xFF;
 					sf.Flags = OFN_FILEMUSTEXIST;
@@ -576,13 +605,23 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					Call(dll.RemoveControl, UINT_MAX);
 					SetDlgItemText(hDlg, IDC_PAUSE, L"||");
 					break;
-				case ID_FAITH: {
+				case ID_TOOLS_FAITH: {
 					HWND hWnd = CreateWindow(L"mtas_faith", L"Faith Actor", WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, FAITH_WIDTH, FAITH_HEIGHT, 0, 0, GetModuleHandle(0), 0);
 					ShowWindow(hWnd, SW_SHOW);
 					UpdateWindow(hWnd);
 					break;
 				}
-				case ID_FR:
+				case ID_TOOLS_COMMANDS: {
+					if (!command_window) {
+						command_window = CreateDialog(GetModuleHandle(0), MAKEINTRESOURCE(IDD_COMMANDS), 0, CommandsProc);
+						ShowWindow(command_window, SW_SHOW);
+					}
+					break;
+				}
+				case ID_TOOLS_TRANSLATOR:
+					ShowWindow(CreateDialog(GetModuleHandle(0), MAKEINTRESOURCE(IDD_TRANSLATOR), 0, TranslatorProc), SW_SHOW);
+					break;
+				case ID_TOOLS_FR:
 					SetForegroundWindow(FindWindowExA(0, 0, "LaunchUnrealUWindowsClient", 0));
 					Sleep(200);
 					Call(dll.RemoveControl, CONTROL_PAUSE | CONTROL_ADVANCE);
@@ -778,6 +817,143 @@ LRESULT CALLBACK FaithProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam
 	}
 
 	return DefWindowProc(hWnd, message, wParam, lParam);
+}
+
+INT_PTR CALLBACK CommandsProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+	switch (message) {
+		case WM_COMMAND: {
+			switch (LOWORD(wParam)) {
+				case IDC_COMMAND_EXECUTE:
+					wchar_t text[0xFF] = { 0 };
+					GetDlgItemText(hWnd, IDC_COMMAND, text, 0xFF);
+					// Thread will free
+					void *cmd = VirtualAllocEx(process, 0, sizeof(text), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+					WriteBuffer(process, cmd, (char *)text, sizeof(text));
+					CloseHandle(CreateRemoteThread(process, 0, 0, (LPTHREAD_START_ROUTINE)dll.PushCommand, cmd, 0, 0));
+					return (INT_PTR)TRUE;
+			}
+			break;
+		}
+		case WM_CLOSE:
+			command_window = 0;
+			return DefWindowProcA(hWnd, message, wParam, lParam);
+	}
+
+	return (INT_PTR)FALSE;
+}
+
+INT_PTR CALLBACK TranslatorProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+	switch (message) {
+		case WM_COMMAND: {
+			switch (LOWORD(wParam)) {
+				case IDC_REPLACE: {
+					HWND wrules = GetDlgItem(hWnd, IDC_RULES);
+					int len = GetWindowTextLengthA(wrules) + 1;
+					if (process && len > 1) {
+						char *buffer = (char *)malloc(len);
+						char *text = (char *)calloc(len, 1);
+						GetWindowTextA(wrules, buffer, len);
+						for (char *a = buffer, *b = text; *a; ++a) {
+							char c = *a;
+							if (!isblank(c)) {
+								*(b++) = c;
+							}
+						}
+						free(buffer);
+
+						std::vector<TRANSLATOR_RULE> rules;
+						wchar_t *original = (wchar_t *)malloc(len * 2);
+						wchar_t *replace = (wchar_t *)malloc(len * 2);
+						for (char *a = text;;) {
+							*original = *replace = 0;
+
+							char *nl = strchr(a, '\n');
+							char *sep = strchr(a, '>');
+							if (sep && (sep < nl || !nl)) {
+								*sep = ' ';
+								if (sscanf(a, "%ws %ws", original, replace) == 2) {
+									TRANSLATOR_RULE rule = { 0 };
+									for (short i = 0; i < sizeof(KEYS) / sizeof(KEYS[0]); ++i) {
+										if (_wcsicmp(KEYS[i], original) == 0) {
+											rule.original = i;
+										}
+
+										if (_wcsicmp(KEYS[i], replace) == 0) {
+											rule.replace = i;
+										}
+									}
+
+									if (rule.original == 0 || rule.replace == 0) {
+										char msg[0xFF] = { 0 };
+										sprintf(msg, "Unable to find keycode for: \"%ws\"", !rule.original ? original : replace);
+										MessageBoxA(0, msg, "Error", MB_ICONERROR);
+										if (nl) *nl = 0;
+										rules.clear();
+									} else {
+										rules.push_back(rule);
+									}
+								}
+							}
+
+							a = nl;
+							if (!(a++)) break;
+						}
+						free(original);
+						free(replace);
+						free(text);
+
+						if (rules.size() > 0) {
+							DWORD replacements = 0;
+							DWORD base = CallRead(dll.GetDemoFrames);
+							DWORD len = CallRead(dll.GetDemoFrameCount);
+							if (base && len) {
+								DWORD size = len * sizeof(FRAME);
+								FRAME *frames = (FRAME *)calloc(size, 1);
+								if (frames) {
+									ReadBuffer(process, (void *)base, (char *)frames, size);
+									for (DWORD fi = 0; fi < len; ++fi) {
+										FRAME frame = frames[fi];
+										bool changed = false;
+										for (DWORD i = 0; i < sizeof(frame.keys) / sizeof(frame.keys[0]); ++i) {
+											auto k = &frame.keys[i];
+											if (!k->keycode) break;
+
+											for (TRANSLATOR_RULE rule : rules) {
+												if (abs(k->keycode) == rule.original) {
+													k->keycode = (k->keycode < 0 ? -1 : 1) * rule.replace;
+													wcscpy(k->alias, KEYS[rule.replace]);
+													changed = true;
+													break;
+												}
+											}
+										}
+
+										if (changed) {
+											WriteBuffer(process, (LPVOID)(base + (fi * sizeof(FRAME))), (char *)&frame, sizeof(FRAME));
+											UpdateFrame(fi, &frame);
+											++replacements;
+										}
+									}
+
+									free(frames);
+								}
+							}
+
+							char msg[0xFF] = { 0 };
+							sprintf(msg, "%d replacements were made", replacements);
+							MessageBoxA(0, msg, "Done", 0);
+						}
+					}
+					return (INT_PTR)TRUE;
+				}
+			}
+			break;
+		}
+		case WM_CLOSE:
+			return DefWindowProcA(hWnd, message, wParam, lParam);
+	}
+
+	return (INT_PTR)FALSE;
 }
 
 LRESULT CALLBACK EditProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
