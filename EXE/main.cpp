@@ -604,6 +604,12 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					WriteShort(process, (LPVOID)CallRead(dll.GetDemoCommand), 0);
 					Call(dll.RemoveControl, UINT_MAX);
 					SetDlgItemText(hDlg, IDC_PAUSE, L"||");
+					CheckDlgButton(hDlg, IDC_RECORD, BST_UNCHECKED);
+					CheckDlgButton(hDlg, IDC_PAUSE_CHANGE, BST_UNCHECKED);
+					CheckDlgButton(hDlg, IDC_PAUSE_GROUND, BST_UNCHECKED);
+					CheckDlgButton(hDlg, IDC_PAUSE_AIR, BST_UNCHECKED);
+					CheckDlgButton(hDlg, IDC_PAUSE_WALLRUN, BST_UNCHECKED);
+					CheckDlgButton(hDlg, IDC_PAUSE_WALLCLIMB, BST_UNCHECKED);
 					break;
 				case ID_TOOLS_FAITH: {
 					HWND hWnd = CreateWindow(L"mtas_faith", L"Faith Actor", WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, FAITH_WIDTH, FAITH_HEIGHT, 0, 0, GetModuleHandle(0), 0);
