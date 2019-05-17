@@ -916,7 +916,7 @@ EXPORT void LoadDemo(char *path) {
 			demo.frames->push_back(fdemo->frames[i]);
 		}
 
-		ExecuteCommand(demo.command);
+		PushCommand(demo.command);
 		demo.frame = demo.jump = 0;
 		demo.reset = true;
 		Unlock();
@@ -948,7 +948,7 @@ EXPORT void SaveDemo(char *path) {
 EXPORT void StartDemo() {
 	RemoveControl(CONTROL_PAUSE | CONTROL_ADVANCE);
 	Lock();
-	ExecuteCommand(demo.command);
+	PushCommand(demo.command);
 	demo.frame = demo.jump = 0;
 	demo.reset = true;
 	Unlock();
@@ -962,12 +962,12 @@ EXPORT void GotoFrame(DWORD frame) {
 		Lock();
 
 		if (frame == 0) {
-			ExecuteCommand(demo.command);
+			PushCommand(demo.command);
 			demo.frame = demo.jump = 0;
 			demo.reset = true;
 		} else {
 			if (frame < demo.frame) {
-				ExecuteCommand(demo.command);
+				PushCommand(demo.command);
 				demo.frame = 0;
 				demo.jump = frame;
 				demo.reset = true;
