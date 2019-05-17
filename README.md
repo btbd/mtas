@@ -63,7 +63,7 @@ A program for making tool-assisted Mirror's Edge speedruns.
 			```
 			LeftMouseButton > RightMouseButton
 			W>D
-```
+			```
 
 		- Click *Replace* to replace the binds.
 - Focus and Resume
