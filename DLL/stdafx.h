@@ -33,6 +33,7 @@ extern "C" {
 	EXPORT void GetDemoFrame(DWORD *);
 	EXPORT void GetDemoFrameCount(DWORD *);
 	EXPORT void GetDemoFrames(DWORD *);
+	EXPORT void GetDemoPosition(DWORD *);
 	EXPORT void SetTimescale(float);
 	EXPORT void GetTimescale(float *);
 	EXPORT void AddGotoFlag(DWORD);
@@ -330,7 +331,16 @@ struct FRAME {
 };
 
 typedef struct {
+	DWORD version;
 	wchar_t command[0xFF];
+	DWORD frame_count;
+	FRAME frames[1];
+} DEMO_V1;
+
+typedef struct {
+	DWORD version;
+	wchar_t command[0xFF];
+	float position[5];
 	DWORD frame_count;
 	FRAME frames[1];
 } DEMO;
@@ -345,7 +355,7 @@ static struct {
 } qpc = { 0 };
 
 static struct {
-	DWORD faith, engine, input, strings, check, uworld, r0, r1, r2;
+	DWORD faith, engine, input, strings, check, uworld, r0, r1, r2, main;
 } base = { 0 };
 
 DWORD GetStringId(wchar_t *str);

@@ -292,7 +292,7 @@ static wchar_t *KEYS[] = {
 #define AddExport(e) dll.e = base + ((DWORD)GetProcAddress((HMODULE)offset, #e) - offset);
 
 static struct {
-	DWORD AddControl, RemoveControl, GetControl, Wait, NewDemo, LoadDemo, SaveDemo, StartDemo, GotoFrame, GetDemoCommand, GetDemoFrame, GetDemoFrameCount, GetDemoFrames, SetTimescale, GetTimescale, AddGotoFlag, RemoveGotoFlag, GetGotoFlags, PushCommand;
+	DWORD AddControl, RemoveControl, GetControl, Wait, NewDemo, LoadDemo, SaveDemo, StartDemo, GotoFrame, GetDemoCommand, GetDemoFrame, GetDemoFrameCount, GetDemoFrames, GetDemoPosition, SetTimescale, GetTimescale, AddGotoFlag, RemoveGotoFlag, GetGotoFlags, PushCommand;
 } dll = { 0 };
 
 #define MOUSE_INPUT_X (0)
@@ -339,6 +339,9 @@ typedef struct {
 #define AddElement(hwnd, flags) { RECT s = { 0 }; GetClientRect(hDlg, &s); RECT r = { 0 }; GetClientRect(hwnd, &r); MapWindowPoints(hwnd, GetParent(hwnd), (LPPOINT)&r, 2); elements.push_back(ELEMENT{ hwnd, r, s, flags }); }
 #define AddElementById(id, flags) AddElement(GetDlgItem(hDlg, id), flags)
 
+#define SetTextFloat(i, v) sprintf(buffer, "%f", v); SetDlgItemTextA(hDlg, i, buffer);
+#define GetTextFloat(i, v) GetDlgItemTextA(hDlg, i, buffer, sizeof(buffer)); sscanf(buffer, "%f", v);
+
 void CALLBACK Listener(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD idEventThread, DWORD dwmsEventTime);
 void Update();
 void UpdateFrame(DWORD index, FRAME *frame);
@@ -349,6 +352,7 @@ void CopyFramesToClipboard(std::vector <FRAME> *frames);
 void AddFrame(FRAME *frame);
 LRESULT CALLBACK FaithProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK OptionsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK FrameDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK CommandsProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK TranslatorProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);

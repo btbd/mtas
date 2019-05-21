@@ -3,7 +3,7 @@
 // #define DEBUG
 
 HANDLE process = 0;
-DWORD focus_frame = 0, faith_base = 0;
+DWORD focus_frame = 0, main_base = 0;
 HWND window = 0, frames_list = 0, command_input = 0, command_window = 0;
 WNDPROC edit_proc = 0, drop_proc = 0;
 char current_demo[0xFF] = { 0 };
@@ -114,11 +114,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	return 0;
 }
 
+void UpdateMainBase() {
+	if (process && !main_base) {
+		MODULEENTRY32 mod = GetModuleInfoByName(GetProcessId(process), L"mirrorsedge.exe");
+		main_base = ReadInt(process, (void *)((DWORD)ProcessFindPattern(process, mod.modBaseAddr, mod.modBaseSize, "\x89\x0D\x00\x00\x00\x00\xB9\x00\x00\x00\x00\xFF", "xx????x????x") + 2));
+	}
+}
+
 void WaitForExit() {
 	WaitForSingleObject(process, INFINITE);
 	CloseHandle(process);
 	SetWindowTextA(window, "MTAS");
-	faith_base = *current_demo = 0;
+	main_base = *current_demo = 0;
 	memset(&dll, 0, sizeof(dll));
 	ListView_DeleteAllItems(frames_list);
 	process = 0;
@@ -153,6 +160,7 @@ void CALLBACK Listener(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG
 			AddExport(GetDemoFrame);
 			AddExport(GetDemoFrameCount);
 			AddExport(GetDemoFrames);
+			AddExport(GetDemoPosition);
 			AddExport(SetTimescale);
 			AddExport(GetTimescale);
 			AddExport(AddGotoFlag);
@@ -362,6 +370,24 @@ void UpdateCommand() {
 	WriteBuffer(process, (LPVOID)CallRead(dll.GetDemoCommand), (char *)command, sizeof(command));
 }
 
+void LoadDemo(char *name) {
+	DWORD size = strlen(name) + 1;
+	void *arg = VirtualAllocEx(process, 0, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	WriteBuffer(process, arg, name, size);
+	Call(dll.LoadDemo, (DWORD)arg);
+	VirtualFreeEx(process, arg, 0, MEM_RELEASE);
+	strcpy(current_demo, name);
+	PathStripPathA(name);
+	wchar_t title[0xFF] = { 0 };
+	wsprintf(title, L"MTAS - %S", name);
+	SetWindowText(window, title);
+	ReadBuffer(process, (void *)CallRead(dll.GetDemoCommand), (char *)title, sizeof(title));
+	SetWindowText(command_input, title);
+	SetDlgItemText(window, IDC_PAUSE, L"||");
+	ListView_DeleteAllItems(frames_list);
+	SetFocusFrame(0);
+}
+
 LRESULT FramesListDraw(LPARAM lParam) {
 	LPNMLVCUSTOMDRAW draw = (LPNMLVCUSTOMDRAW)lParam;
 	switch (draw->nmcd.dwDrawStage) {
@@ -433,6 +459,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			AddElement(frames_list, SIZE_WIDTH | SIZE_HEIGHT);
 			AddElementById(IDC_ADVANCE, ALIGN_RIGHT);
 			AddElementById(IDC_PAUSE, ALIGN_RIGHT);
+			AddElementById(IDC_OPTIONS, ALIGN_RIGHT);
 			AddElementById(IDC_START, ALIGN_RIGHT);
 			AddElementById(IDC_STATIC_STATES, ALIGN_RIGHT);
 			AddElementById(IDC_PAUSE_CHANGE, ALIGN_RIGHT);
@@ -503,20 +530,43 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					of.nMaxFile = 0xFF;
 					of.Flags = OFN_FILEMUSTEXIST;
 					if (GetOpenFileNameA(&of)) {
-						void *arg = VirtualAllocEx(process, 0, sizeof(name), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-						WriteBuffer(process, arg, name, sizeof(name));
-						Call(dll.LoadDemo, (DWORD)arg);
-						VirtualFreeEx(process, arg, 0, MEM_RELEASE);
-						strcpy(current_demo, name);
-						PathStripPathA(name);
-						wchar_t title[0xFF] = { 0 };
-						wsprintf(title, L"MTAS - %S", name);
-						SetWindowText(hDlg, title);
-						ReadBuffer(process, (void *)CallRead(dll.GetDemoCommand), (char *)title, sizeof(title));
-						SetWindowText(command_input, title);
-						SetDlgItemText(hDlg, IDC_PAUSE, L"||");
-						ListView_DeleteAllItems(frames_list);
-						SetFocusFrame(0);
+						FILE *file = fopen(name, "rb");
+						if (file) {
+							DWORD version = 0;
+							fread(&version, sizeof(version), 1, file);
+							if (version >= 1 && version <= 2) {
+								fclose(file);
+								LoadDemo(name);
+							} else if (MessageBoxA(0, "No version number found. Do you want to force it to demo version 1?", "Error", MB_ICONERROR | MB_YESNOCANCEL) == IDYES) {
+								fseek(file, 0, SEEK_END);
+								DWORD fsize = ftell(file);
+								DWORD size = sizeof(DWORD) + fsize;
+								DWORD *buffer = (DWORD *)malloc(size);
+								if (buffer) {
+									fseek(file, 0, SEEK_SET);
+									fread((void *)((DWORD)buffer + sizeof(DWORD)), fsize, 1, file);
+									fclose(file);
+
+									*buffer = 1;
+									FILE *file = fopen(name, "wb");
+									if (file) {
+										fwrite(buffer, size, 1, file);
+										fclose(file);
+										LoadDemo(name);
+									} else {
+										MessageBoxA(0, "Failed to open for write-access", "Error", MB_ICONERROR | MB_OK);
+									}
+									free(buffer);
+								} else {
+									fclose(file);
+									MessageBoxA(0, "Failed to allocate memory for file", "Error", MB_ICONERROR | MB_OK);
+								}
+							} else {
+								fclose(file);
+							}
+						} else {
+							MessageBoxA(0, "Failed to open for read-access", "Error", MB_ICONERROR | MB_OK);
+						}
 					}
 					break;
 				}
@@ -551,6 +601,9 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					}
 					break;
 				}
+				case IDC_OPTIONS:
+					DialogBox(0, MAKEINTRESOURCE(IDD_OPTIONS), hDlg, OptionsDlgProc);
+					break;
 				case IDC_START:
 					SetDlgItemText(hDlg, IDC_PAUSE, L"||");
 					UpdateCommand();
@@ -754,6 +807,66 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 	return FALSE;
 }
 
+INT_PTR CALLBACK OptionsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
+	switch (message) {
+		case WM_INITDIALOG: {
+			float position[5] = { 0 };
+			char buffer[0xFF] = { 0 };
+			ReadBuffer(process, (void *)CallRead(dll.GetDemoPosition), (char *)position, sizeof(position));
+			SetTextFloat(IDC_X, position[0]);
+			SetTextFloat(IDC_Y, position[1]);
+			SetTextFloat(IDC_Z, position[2]);
+			SetTextFloat(IDC_RX, position[3]);
+			SetTextFloat(IDC_RY, position[4]);
+			break;
+		}
+		case WM_COMMAND: {
+			switch (LOWORD(wParam)) {
+				case IDC_CURRENT: {
+					UpdateMainBase();
+					float position[3] = { 0 };
+					int rotation[2] = { 0 };
+					char buffer[0xFF] = { 0 };
+					ReadBuffer(process, GetPointer(process, 5, main_base, 0xCC, 0x4A4, 0x214, 0xE8), (char *)position, sizeof(position));
+					ReadBuffer(process, GetPointer(process, 4, main_base, 0xCC, 0x70, 0xF4), (char *)rotation, sizeof(rotation));
+					SetTextFloat(IDC_X, position[0]);
+					SetTextFloat(IDC_Y, position[1]);
+					SetTextFloat(IDC_Z, position[2]);
+					SetTextFloat(IDC_RX, IntToDegrees(rotation[0]));
+					SetTextFloat(IDC_RY, IntToDegrees(rotation[1]));
+					break;
+				}
+				case IDC_RESET: {
+					float position[5] = { 0 };
+					char buffer[0xFF] = { 0 };
+					SetTextFloat(IDC_X, position[0]);
+					SetTextFloat(IDC_Y, position[1]);
+					SetTextFloat(IDC_Z, position[2]);
+					SetTextFloat(IDC_RX, position[3]);
+					SetTextFloat(IDC_RY, position[4]);
+					break;
+				}
+			}
+
+			break;
+		}
+		case WM_CLOSE: {
+			float position[5] = { 0 };
+			char buffer[0xFF] = { 0 };
+			GetTextFloat(IDC_X, &position[0]);
+			GetTextFloat(IDC_Y, &position[1]);
+			GetTextFloat(IDC_Z, &position[2]);
+			GetTextFloat(IDC_RX, &position[3]);
+			GetTextFloat(IDC_RY, &position[4]);
+			WriteBuffer(process, (void *)CallRead(dll.GetDemoPosition), (char *)position, sizeof(position));
+			EndDialog(hDlg, 0);
+			break;
+		}
+	}
+
+	return FALSE;
+}
+
 LRESULT CALLBACK FaithProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
 	switch (message) {
 		case WM_CREATE:
@@ -777,13 +890,9 @@ LRESULT CALLBACK FaithProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam
 			char text[0xFFF] = { 0 };
 			char player[0xFFF] = { 0 };
 			if (process) {
-				if (!faith_base) {
-					MODULEENTRY32 mod = GetModuleInfoByName(GetProcessId(process), L"mirrorsedge.exe");
-					faith_base = ReadInt(process, (void *)((DWORD)ProcessFindPattern(process, mod.modBaseAddr, mod.modBaseSize, "\x89\x0D\x00\x00\x00\x00\xB9\x00\x00\x00\x00\xFF", "xx????x????x") + 2));
-				}
-				
-				ReadBuffer(process, GetPointer(process, 5, faith_base, 0xCC, 0x4A4, 0x214, 0x00), player, sizeof(player));
-				ReadBuffer(process, GetPointer(process, 4, faith_base, 0xCC, 0x70, 0xF4), player, 8);
+				UpdateMainBase();
+				ReadBuffer(process, GetPointer(process, 5, main_base, 0xCC, 0x4A4, 0x214, 0x00), player, sizeof(player));
+				ReadBuffer(process, GetPointer(process, 4, main_base, 0xCC, 0x70, 0xF4), player, 8);
 			}
 
 			rect.left = 10;

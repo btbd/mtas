@@ -13,8 +13,9 @@ struct {
 
 struct {
 	wchar_t command[0xFF] = { 0 };
+	float position[5] = { 0 };
 	DWORD frame = 0, jump = 0;
-	bool reset = false;
+	bool reset = false, trigger = false;
 	std::vector<FRAME> *frames = new std::vector<FRAME>;
 } demo;
 
@@ -222,8 +223,20 @@ int __fastcall MouseHandlerHook(int this_, void *idle_, int a2, int a3, int id, 
 	return MouseHandlerOriginal(this_, a2, a3, id, a5, change, delta, a8);
 }
 
+int DegreesToInt(float i) {
+	return (int)((i / 360) * 0x10000) % 0x10000;
+}
+
 void __fastcall PlayerHandlerHook(void *this_, void *idle_, float a2, int a3) {
 	base.faith = (DWORD)this_;
+	if (demo.trigger && base.faith && *(byte *)(base.faith + 0x68) != 0) {
+		demo.trigger = false;
+		if (demo.position[0] != 0.0f && demo.position[1] != 0.0f && demo.position[2] != 0.0f && demo.position[3] != 0.0f && demo.position[4] != 0.0f) {
+			WriteBuffer(GetCurrentProcess(), (void *)(base.faith + 0xE8), (char *)demo.position, sizeof(demo.position));
+			int rotation[] = { DegreesToInt(demo.position[3]), DegreesToInt(demo.position[4]) };
+			WriteBuffer(GetCurrentProcess(), GetPointer(GetCurrentProcess(), 4, base.main, 0xCC, 0x70, 0xF4), (char *)rotation, sizeof(rotation));
+		}
+	}
 	PlayerHandlerOriginal(this_, a2, a3);
 }
 
@@ -453,11 +466,13 @@ int __fastcall LevelLoadHook(void *this_, void *idle_, int a2, __int64 a3) {
 	if (demo.reset) {
 		demo.frame = 0;
 		demo.reset = false;
+		demo.trigger = true;
 
 		int ret = LevelLoadOriginal(this_, a2, a3);
 		if (demo.jump) {
 			rendering.Disable(true);
 		}
+
 		Unlock();
 		return ret;
 	} else {
@@ -799,6 +814,11 @@ void MainHooks() {
 	base.strings = *(DWORD *)(addr + 1);
 	printf("- Table: %x\n", base.strings);
 
+	addr = (DWORD)ProcessFindPattern(GetCurrentProcess(), mod.modBaseAddr, mod.modBaseSize, "\x89\x0D\x00\x00\x00\x00\xB9\x00\x00\x00\x00\xFF", "xx????x????x");
+	printf("Main Match: %x\n", addr);
+	base.main = *(DWORD *)(addr + 2);
+	printf("- Main: %x\n", base.main);
+
 	SetJMP(GetTickCountHook, GetTickCount, 0);
 	SetJMP(GetTickCount64Hook, GetTickCount64, 0);
 	TrampolineHook(QueryPerformanceCounterHook, QueryPerformanceCounter, (void **)&QueryPerformanceCounterOriginal);
@@ -892,6 +912,8 @@ EXPORT void NewDemo() {
 	RemoveControl(CONTROL_PAUSE | CONTROL_ADVANCE);
 	Lock();
 	*demo.command = 0;
+	demo.reset = false;
+	memset(demo.position, 0, sizeof(demo.position));
 	demo.frame = demo.jump = 0;
 	demo.frames->clear();
 	demo.frames->shrink_to_fit();
@@ -903,25 +925,56 @@ EXPORT void LoadDemo(char *path) {
 
 	FILE *file = fopen(path, "rb");
 	if (file) {
-		DEMO *fdemo = (DEMO *)calloc(sizeof(DEMO), 1);
-		fread(fdemo, sizeof(DEMO), 1, file);
+		DWORD version = 0;
+		fread(&version, sizeof(version), 1, file);
 		fseek(file, 0, SEEK_SET);
-		DWORD size = sizeof(DEMO) + (fdemo->frame_count * sizeof(FRAME));
-		fdemo = (DEMO *)realloc(fdemo, size);
-		fread(fdemo, size, 1, file);
 
-		Lock();
-		wcscpy(demo.command, fdemo->command);
-		for (DWORD i = 0; i < fdemo->frame_count; ++i) {
-			demo.frames->push_back(fdemo->frames[i]);
+		switch (version) {
+			case 1: {
+				DEMO_V1 *fdemo = (DEMO_V1 *)calloc(sizeof(DEMO_V1), 1);
+				fread(fdemo, sizeof(DEMO_V1), 1, file);
+				fseek(file, 0, SEEK_SET);
+				DWORD size = sizeof(DEMO_V1) + (fdemo->frame_count * sizeof(FRAME));
+				fdemo = (DEMO_V1 *)realloc(fdemo, size);
+				fread(fdemo, size, 1, file);
+
+				Lock();
+				wcscpy(demo.command, fdemo->command);
+				for (DWORD i = 0; i < fdemo->frame_count; ++i) {
+					demo.frames->push_back(fdemo->frames[i]);
+				}
+
+				PushCommand(demo.command);
+				demo.reset = true;
+				Unlock();
+
+				free(fdemo);
+				break;
+			}
+			case 2: {
+				DEMO *fdemo = (DEMO *)calloc(sizeof(DEMO), 1);
+				fread(fdemo, sizeof(DEMO), 1, file);
+				fseek(file, 0, SEEK_SET);
+				DWORD size = sizeof(DEMO) + (fdemo->frame_count * sizeof(FRAME));
+				fdemo = (DEMO *)realloc(fdemo, size);
+				fread(fdemo, size, 1, file);
+
+				Lock();
+				wcscpy(demo.command, fdemo->command);
+				memcpy(demo.position, fdemo->position, sizeof(demo.position));
+				for (DWORD i = 0; i < fdemo->frame_count; ++i) {
+					demo.frames->push_back(fdemo->frames[i]);
+				}
+
+				PushCommand(demo.command);
+				demo.reset = true;
+				Unlock();
+
+				free(fdemo);
+				break;
+			}
 		}
 
-		PushCommand(demo.command);
-		demo.frame = demo.jump = 0;
-		demo.reset = true;
-		Unlock();
-
-		free(fdemo);
 		fclose(file);
 	}
 }
@@ -931,7 +984,9 @@ EXPORT void SaveDemo(char *path) {
 		DWORD frames_size = demo.frames->size() * sizeof(FRAME);
 		DWORD size = sizeof(DEMO) + frames_size;
 		DEMO *fdemo = (DEMO *)calloc(size, 1);
+		fdemo->version = 2;
 		wcscpy(fdemo->command, demo.command);
+		memcpy(fdemo->position, demo.position, sizeof(demo.position));
 		fdemo->frame_count = demo.frames->size();
 		memcpy(&fdemo->frames[0], &(*demo.frames)[0], frames_size);
 
@@ -1002,6 +1057,10 @@ EXPORT void GetDemoFrameCount(DWORD *out) {
 
 EXPORT void GetDemoFrames(DWORD *out) {
 	if (out && demo.frames) *out = (DWORD)&(*demo.frames)[0];
+}
+
+EXPORT void GetDemoPosition(DWORD *out) {
+	if (out) *out = (DWORD)&demo.position[0];
 }
 
 EXPORT void SetTimescale(float scale) {
